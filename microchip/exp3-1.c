@@ -24,6 +24,9 @@
 #define DISPLAY_REFRESH_MS          2
 #define KEY_SCAN_PERIOD_MS          10
 #define KEY_DEBOUNCE_TICKS          2
+#define SCROLL_SLOW_MS              600
+#define SCROLL_MEDIUM_MS            300
+#define SCROLL_FAST_MS              150
 #define DEFAULT_YEAR                2026
 #define DEFAULT_MONTH               1
 #define DEFAULT_DATE                1
@@ -149,6 +152,9 @@ static volatile uint8_t g_key_disp_state;
 static volatile uint8_t g_key_format_state;
 static volatile uint8_t g_key_disp_count;
 static volatile uint8_t g_key_format_count;
+static volatile uint16_t g_scroll_speed_ms;
+static volatile uint16_t g_scroll_elapsed_ms;
+static volatile uint8_t g_scroll_offset;
 static volatile char g_uart_lines[2][UART_FRAME_MAX_LEN + 1];
 static char g_message[MSG_MAX_LEN + 1];
 static char g_last_key[KEY_NAME_MAX_LEN + 1];
@@ -234,6 +240,9 @@ static void ResetClockState(void)
     g_display_page = 0;
     g_beep_remaining_ms = 0;
     g_display_dirty = 1;
+    g_scroll_speed_ms = SCROLL_MEDIUM_MS;
+    g_scroll_elapsed_ms = 0;
+    g_scroll_offset = 0;
     GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_1, 0);
 }
 
@@ -261,6 +270,8 @@ static void ResetProtocolState(void)
     g_key_format_state = 0;
     g_key_disp_count = 0;
     g_key_format_count = 0;
+    g_scroll_elapsed_ms = 0;
+    g_scroll_offset = 0;
     g_led_value = 0x00;
     g_mode_day = 1;
     ResetClockState();
@@ -976,6 +987,7 @@ static void HandleSetMode(char *tokens[], uint8_t count)
     if (MatchToken(tokens[0], "DAY"))
     {
         g_mode_day = 1;
+        g_scroll_speed_ms = SCROLL_FAST_MS;
         g_display_dirty = 1;
         UARTReplyOK(0);
         return;
@@ -983,6 +995,7 @@ static void HandleSetMode(char *tokens[], uint8_t count)
     if (MatchToken(tokens[0], "NIGHT"))
     {
         g_mode_day = 0;
+        g_scroll_speed_ms = SCROLL_SLOW_MS;
         g_display_dirty = 1;
         UARTReplyOK(0);
         return;
@@ -1100,6 +1113,8 @@ static void HandleSetMsg(char *cursor)
     }
 
     memcpy(g_message, cursor, length + 1);
+    g_scroll_offset = 0;
+    g_scroll_elapsed_ms = 0;
     g_display_dirty = 1;
     UARTReplyOK(0);
 }
@@ -1124,6 +1139,19 @@ static void ApplyDisplayOutput(void)
 
 static void ProcessDisplayTask(void)
 {
+    if ((g_display_on != 0) && (g_display_page == 2) && (strlen(g_message) > DISPLAY_DIGITS) &&
+        (g_scroll_elapsed_ms >= g_scroll_speed_ms))
+    {
+        uint8_t scroll_limit = (uint8_t)(strlen(g_message) + DISPLAY_DIGITS);
+        g_scroll_elapsed_ms = 0;
+        g_scroll_offset++;
+        if (g_scroll_offset >= scroll_limit)
+        {
+            g_scroll_offset = 0;
+        }
+        g_display_dirty = 1;
+    }
+
     if (g_display_dirty != 0)
     {
         UpdateDisplayBuffer();
@@ -1179,18 +1207,37 @@ static void UpdateDisplayBuffer(void)
 
     if ((g_display_page == 2) && (g_message[0] != '\0'))
     {
-        FillDisplayText(g_message);
+        size_t length = strlen(g_message);
+        if (length <= DISPLAY_DIGITS)
+        {
+            FillDisplayText(g_message);
+        }
+        else
+        {
+            uint8_t index;
+            memset(text, ' ', DISPLAY_DIGITS);
+            text[DISPLAY_DIGITS] = '\0';
+            for (index = 0; index < DISPLAY_DIGITS; index++)
+            {
+                uint8_t source = (uint8_t)(g_scroll_offset + index);
+                if (source < length)
+                {
+                    text[index] = g_message[source];
+                }
+            }
+            memcpy(g_display_chars, text, DISPLAY_DIGITS + 1);
+        }
         return;
     }
 
     if (g_display_page == 1)
     {
-        snprintf(text, sizeof(text), "%02u%02u%04u", g_now.month, g_now.date, g_now.year);
+        snprintf(text, sizeof(text), "%02u-%02u-%02u", g_now.month, g_now.date, g_now.year % 100);
         FillDisplayText(text);
         return;
     }
 
-    snprintf(text, sizeof(text), "%02u%02u%02u", g_now.hour, g_now.minute, g_now.second);
+    snprintf(text, sizeof(text), "%02u-%02u-%02u", g_now.hour, g_now.minute, g_now.second);
     FillDisplayText(text);
 }
 
@@ -1365,6 +1412,8 @@ static void ApplyVirtualKey(const char *name)
         {
             g_display_page++;
         }
+        g_scroll_offset = 0;
+        g_scroll_elapsed_ms = 0;
         g_display_dirty = 1;
         return;
     }
@@ -1373,6 +1422,69 @@ static void ApplyVirtualKey(const char *name)
     {
         g_format_left = (uint8_t)(g_format_left == 0);
         g_display_dirty = 1;
+        return;
+    }
+
+    if (MatchToken(name, "LEFT"))
+    {
+        g_format_left = 1;
+        g_display_dirty = 1;
+        return;
+    }
+
+    if (MatchToken(name, "RIGHT"))
+    {
+        g_format_left = 0;
+        g_display_dirty = 1;
+        return;
+    }
+
+    if (MatchToken(name, "TIME") || MatchToken(name, "USER1"))
+    {
+        g_display_page = 0;
+        g_scroll_offset = 0;
+        g_scroll_elapsed_ms = 0;
+        g_display_dirty = 1;
+        return;
+    }
+
+    if (MatchToken(name, "DATE") || MatchToken(name, "USER2"))
+    {
+        g_display_page = 1;
+        g_scroll_offset = 0;
+        g_scroll_elapsed_ms = 0;
+        g_display_dirty = 1;
+        return;
+    }
+
+    if (MatchToken(name, "MSG"))
+    {
+        if (g_message[0] != '\0')
+        {
+            g_display_page = 2;
+            g_scroll_offset = 0;
+            g_scroll_elapsed_ms = 0;
+            g_display_dirty = 1;
+        }
+        return;
+    }
+
+    if (MatchToken(name, "SPEED"))
+    {
+        if (g_scroll_speed_ms == SCROLL_SLOW_MS)
+        {
+            g_scroll_speed_ms = SCROLL_MEDIUM_MS;
+        }
+        else if (g_scroll_speed_ms == SCROLL_MEDIUM_MS)
+        {
+            g_scroll_speed_ms = SCROLL_FAST_MS;
+        }
+        else
+        {
+            g_scroll_speed_ms = SCROLL_SLOW_MS;
+        }
+        g_scroll_elapsed_ms = 0;
+        return;
     }
 }
 
