@@ -265,7 +265,7 @@ static void ProcessCommand(char *line)
     if ((colon != 0) && (colon != command))
     {
         *colon = '\0';
-        subcommand = colon;
+        subcommand = colon + 1;
     }
 
     if (MatchToken(command, "*PING"))
@@ -335,7 +335,12 @@ static void HandleSetCommand(char *subcommand, char *cursor)
     char *tokens[8];
     uint8_t count;
 
-    if (MatchToken(subcommand, ":MSG"))
+    if ((subcommand != 0) && (*subcommand == ':'))
+    {
+        subcommand++;
+    }
+
+    if (MatchToken(subcommand, "MSG"))
     {
         HandleSetMsg(cursor);
         return;
@@ -343,47 +348,47 @@ static void HandleSetCommand(char *subcommand, char *cursor)
 
     count = CollectTokens(cursor, tokens, 8);
 
-    if (MatchToken(subcommand, ":DATE"))
+    if (MatchToken(subcommand, "DATE"))
     {
         HandleSetDate(tokens, count);
         return;
     }
-    if (MatchToken(subcommand, ":TIME"))
+    if (MatchToken(subcommand, "TIME"))
     {
         HandleSetTime(tokens, count);
         return;
     }
-    if (MatchToken(subcommand, ":ALARM"))
+    if (MatchToken(subcommand, "ALARM"))
     {
         HandleSetAlarm(tokens, count);
         return;
     }
-    if (MatchToken(subcommand, ":DISPlay"))
+    if (MatchToken(subcommand, "DISPlay"))
     {
         HandleSetDisplay(tokens, count);
         return;
     }
-    if (MatchToken(subcommand, ":FORMAT"))
+    if (MatchToken(subcommand, "FORMAT"))
     {
         HandleSetFormat(tokens, count);
         return;
     }
-    if (MatchToken(subcommand, ":BEEP"))
+    if (MatchToken(subcommand, "BEEP"))
     {
         HandleSetBeep(tokens, count);
         return;
     }
-    if (MatchToken(subcommand, ":LED"))
+    if (MatchToken(subcommand, "LED"))
     {
         HandleSetLed(tokens, count);
         return;
     }
-    if (MatchToken(subcommand, ":KEY"))
+    if (MatchToken(subcommand, "KEY"))
     {
         HandleSetKey(tokens, count);
         return;
     }
-    if (MatchToken(subcommand, ":MODE"))
+    if (MatchToken(subcommand, "MODE"))
     {
         HandleSetMode(tokens, count);
         return;
@@ -397,29 +402,34 @@ static void HandleGetCommand(char *subcommand, char *cursor)
     char *tokens[8];
     uint8_t count;
 
+    if ((subcommand != 0) && (*subcommand == ':'))
+    {
+        subcommand++;
+    }
+
     count = CollectTokens(cursor, tokens, 8);
 
-    if (MatchToken(subcommand, ":DATE"))
+    if (MatchToken(subcommand, "DATE"))
     {
         HandleGetDate(tokens, count);
         return;
     }
-    if (MatchToken(subcommand, ":TIME"))
+    if (MatchToken(subcommand, "TIME"))
     {
         HandleGetTime(tokens, count);
         return;
     }
-    if (MatchToken(subcommand, ":ALARM"))
+    if (MatchToken(subcommand, "ALARM"))
     {
         HandleGetAlarm(tokens, count);
         return;
     }
-    if (MatchToken(subcommand, ":DISPlay"))
+    if (MatchToken(subcommand, "DISPlay"))
     {
         HandleGetDisplay(tokens, count);
         return;
     }
-    if (MatchToken(subcommand, ":FORMAT"))
+    if (MatchToken(subcommand, "FORMAT"))
     {
         HandleGetFormat(tokens, count);
         return;
