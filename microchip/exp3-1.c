@@ -155,6 +155,7 @@ static volatile uint8_t g_key_format_count;
 static volatile uint16_t g_scroll_speed_ms;
 static volatile uint16_t g_scroll_elapsed_ms;
 static volatile uint8_t g_scroll_offset;
+static volatile uint8_t g_beep_output_state;
 static volatile char g_uart_lines[2][UART_FRAME_MAX_LEN + 1];
 static char g_message[MSG_MAX_LEN + 1];
 static char g_last_key[KEY_NAME_MAX_LEN + 1];
@@ -243,6 +244,7 @@ static void ResetClockState(void)
     g_scroll_speed_ms = SCROLL_MEDIUM_MS;
     g_scroll_elapsed_ms = 0;
     g_scroll_offset = 0;
+    g_beep_output_state = 0;
     GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_1, 0);
 }
 
@@ -272,6 +274,7 @@ static void ResetProtocolState(void)
     g_key_format_count = 0;
     g_scroll_elapsed_ms = 0;
     g_scroll_offset = 0;
+    g_beep_output_state = 0;
     g_led_value = 0x00;
     g_mode_day = 1;
     ResetClockState();
@@ -504,90 +507,165 @@ static void HandleSetDate(char *tokens[], uint8_t count)
     uint8_t month = g_now.month;
     uint8_t date = g_now.date;
     uint32_t value;
+    uint8_t pair_mode = 0;
 
-    while (index < count)
+    if ((count >= 2) &&
+        (MatchToken(tokens[0], "YEAR") || MatchToken(tokens[0], "MONTH") || MatchToken(tokens[0], "DATE")) &&
+        ParseUnsigned(tokens[1], &value))
     {
-        if (MatchToken(tokens[index], "YEAR"))
-        {
-            if (used[0] != 0)
-            {
-                UARTReplyError("PARAM");
-                return;
-            }
-            used[0] = 1;
-            field_ids[field_count++] = 0;
-            index++;
-            continue;
-        }
-        if (MatchToken(tokens[index], "MONTH"))
-        {
-            if (used[1] != 0)
-            {
-                UARTReplyError("PARAM");
-                return;
-            }
-            used[1] = 1;
-            field_ids[field_count++] = 1;
-            index++;
-            continue;
-        }
-        if (MatchToken(tokens[index], "DATE"))
-        {
-            if (used[2] != 0)
-            {
-                UARTReplyError("PARAM");
-                return;
-            }
-            used[2] = 1;
-            field_ids[field_count++] = 2;
-            index++;
-            continue;
-        }
-        break;
+        pair_mode = 1;
     }
 
-    if ((field_count == 0) || ((count - index) != field_count))
+    if (pair_mode != 0)
     {
-        UARTReplyError("SYNTAX");
-        return;
-    }
-
-    while (index < count)
-    {
-        if (!ParseUnsigned(tokens[index], &value))
+        while (index < count)
         {
-            UARTReplyError("PARAM");
+            if ((index + 1) >= count)
+            {
+                UARTReplyError("SYNTAX");
+                return;
+            }
+            if (MatchToken(tokens[index], "YEAR"))
+            {
+                if ((used[0] != 0) || !ParseUnsigned(tokens[index + 1], &value))
+                {
+                    UARTReplyError((used[0] != 0) ? "PARAM" : "SYNTAX");
+                    return;
+                }
+                if ((value < 2000) || (value > 2099))
+                {
+                    UARTReplyError("RANGE");
+                    return;
+                }
+                year = (uint16_t)value;
+                used[0] = 1;
+                index += 2;
+                continue;
+            }
+            if (MatchToken(tokens[index], "MONTH"))
+            {
+                if ((used[1] != 0) || !ParseUnsigned(tokens[index + 1], &value))
+                {
+                    UARTReplyError((used[1] != 0) ? "PARAM" : "SYNTAX");
+                    return;
+                }
+                if ((value < 1) || (value > 12))
+                {
+                    UARTReplyError("RANGE");
+                    return;
+                }
+                month = (uint8_t)value;
+                used[1] = 1;
+                index += 2;
+                continue;
+            }
+            if (MatchToken(tokens[index], "DATE"))
+            {
+                if ((used[2] != 0) || !ParseUnsigned(tokens[index + 1], &value))
+                {
+                    UARTReplyError((used[2] != 0) ? "PARAM" : "SYNTAX");
+                    return;
+                }
+                if ((value < 1) || (value > 31))
+                {
+                    UARTReplyError("RANGE");
+                    return;
+                }
+                date = (uint8_t)value;
+                used[2] = 1;
+                index += 2;
+                continue;
+            }
+            UARTReplyError("SYNTAX");
+            return;
+        }
+    }
+    else
+    {
+        while (index < count)
+        {
+            if (MatchToken(tokens[index], "YEAR"))
+            {
+                if (used[0] != 0)
+                {
+                    UARTReplyError("PARAM");
+                    return;
+                }
+                used[0] = 1;
+                field_ids[field_count++] = 0;
+                index++;
+                continue;
+            }
+            if (MatchToken(tokens[index], "MONTH"))
+            {
+                if (used[1] != 0)
+                {
+                    UARTReplyError("PARAM");
+                    return;
+                }
+                used[1] = 1;
+                field_ids[field_count++] = 1;
+                index++;
+                continue;
+            }
+            if (MatchToken(tokens[index], "DATE"))
+            {
+                if (used[2] != 0)
+                {
+                    UARTReplyError("PARAM");
+                    return;
+                }
+                used[2] = 1;
+                field_ids[field_count++] = 2;
+                index++;
+                continue;
+            }
+            break;
+        }
+
+        if ((field_count == 0) || ((count - index) != field_count))
+        {
+            UARTReplyError("SYNTAX");
             return;
         }
 
-        switch (field_ids[index - field_count])
+        while (index < count)
         {
-        case 0:
-            if ((value < 2000) || (value > 2099))
+            if (!ParseUnsigned(tokens[index], &value))
             {
-                UARTReplyError("RANGE");
+                UARTReplyError("PARAM");
                 return;
             }
-            year = (uint16_t)value;
-            break;
-        case 1:
-            if ((value < 1) || (value > 12))
+
+            switch (field_ids[index - field_count])
             {
-                UARTReplyError("RANGE");
-                return;
+            case 0:
+                if ((value < 2000) || (value > 2099))
+                {
+                    UARTReplyError("RANGE");
+                    return;
+                }
+                year = (uint16_t)value;
+                break;
+            case 1:
+                if ((value < 1) || (value > 12))
+                {
+                    UARTReplyError("RANGE");
+                    return;
+                }
+                month = (uint8_t)value;
+                break;
+            default:
+                if ((value < 1) || (value > 31))
+                {
+                    UARTReplyError("RANGE");
+                    return;
+                }
+                date = (uint8_t)value;
+                break;
             }
-            month = (uint8_t)value;
-            break;
-        default:
-            if ((value < 1) || (value > 31))
-            {
-                UARTReplyError("RANGE");
-                return;
-            }
-            date = (uint8_t)value;
-            break;
+            index++;
         }
-        index++;
     }
 
     if (!IsValidDate(year, month, date))
@@ -613,90 +691,165 @@ static void HandleSetTime(char *tokens[], uint8_t count)
     uint8_t minute = g_now.minute;
     uint8_t second = g_now.second;
     uint32_t value;
+    uint8_t pair_mode = 0;
 
-    while (index < count)
+    if ((count >= 2) &&
+        (MatchToken(tokens[0], "HOUR") || MatchToken(tokens[0], "MINute") || MatchToken(tokens[0], "SECond")) &&
+        ParseUnsigned(tokens[1], &value))
     {
-        if (MatchToken(tokens[index], "HOUR"))
-        {
-            if (used[0] != 0)
-            {
-                UARTReplyError("PARAM");
-                return;
-            }
-            used[0] = 1;
-            field_ids[field_count++] = 0;
-            index++;
-            continue;
-        }
-        if (MatchToken(tokens[index], "MINute"))
-        {
-            if (used[1] != 0)
-            {
-                UARTReplyError("PARAM");
-                return;
-            }
-            used[1] = 1;
-            field_ids[field_count++] = 1;
-            index++;
-            continue;
-        }
-        if (MatchToken(tokens[index], "SECond"))
-        {
-            if (used[2] != 0)
-            {
-                UARTReplyError("PARAM");
-                return;
-            }
-            used[2] = 1;
-            field_ids[field_count++] = 2;
-            index++;
-            continue;
-        }
-        break;
+        pair_mode = 1;
     }
 
-    if ((field_count == 0) || ((count - index) != field_count))
+    if (pair_mode != 0)
     {
-        UARTReplyError("SYNTAX");
-        return;
-    }
-
-    while (index < count)
-    {
-        if (!ParseUnsigned(tokens[index], &value))
+        while (index < count)
         {
-            UARTReplyError("PARAM");
+            if ((index + 1) >= count)
+            {
+                UARTReplyError("SYNTAX");
+                return;
+            }
+            if (MatchToken(tokens[index], "HOUR"))
+            {
+                if ((used[0] != 0) || !ParseUnsigned(tokens[index + 1], &value))
+                {
+                    UARTReplyError((used[0] != 0) ? "PARAM" : "SYNTAX");
+                    return;
+                }
+                if (value > 23)
+                {
+                    UARTReplyError("RANGE");
+                    return;
+                }
+                hour = (uint8_t)value;
+                used[0] = 1;
+                index += 2;
+                continue;
+            }
+            if (MatchToken(tokens[index], "MINute"))
+            {
+                if ((used[1] != 0) || !ParseUnsigned(tokens[index + 1], &value))
+                {
+                    UARTReplyError((used[1] != 0) ? "PARAM" : "SYNTAX");
+                    return;
+                }
+                if (value > 59)
+                {
+                    UARTReplyError("RANGE");
+                    return;
+                }
+                minute = (uint8_t)value;
+                used[1] = 1;
+                index += 2;
+                continue;
+            }
+            if (MatchToken(tokens[index], "SECond"))
+            {
+                if ((used[2] != 0) || !ParseUnsigned(tokens[index + 1], &value))
+                {
+                    UARTReplyError((used[2] != 0) ? "PARAM" : "SYNTAX");
+                    return;
+                }
+                if (value > 59)
+                {
+                    UARTReplyError("RANGE");
+                    return;
+                }
+                second = (uint8_t)value;
+                used[2] = 1;
+                index += 2;
+                continue;
+            }
+            UARTReplyError("SYNTAX");
+            return;
+        }
+    }
+    else
+    {
+        while (index < count)
+        {
+            if (MatchToken(tokens[index], "HOUR"))
+            {
+                if (used[0] != 0)
+                {
+                    UARTReplyError("PARAM");
+                    return;
+                }
+                used[0] = 1;
+                field_ids[field_count++] = 0;
+                index++;
+                continue;
+            }
+            if (MatchToken(tokens[index], "MINute"))
+            {
+                if (used[1] != 0)
+                {
+                    UARTReplyError("PARAM");
+                    return;
+                }
+                used[1] = 1;
+                field_ids[field_count++] = 1;
+                index++;
+                continue;
+            }
+            if (MatchToken(tokens[index], "SECond"))
+            {
+                if (used[2] != 0)
+                {
+                    UARTReplyError("PARAM");
+                    return;
+                }
+                used[2] = 1;
+                field_ids[field_count++] = 2;
+                index++;
+                continue;
+            }
+            break;
+        }
+
+        if ((field_count == 0) || ((count - index) != field_count))
+        {
+            UARTReplyError("SYNTAX");
             return;
         }
 
-        switch (field_ids[index - field_count])
+        while (index < count)
         {
-        case 0:
-            if (value > 23)
+            if (!ParseUnsigned(tokens[index], &value))
             {
-                UARTReplyError("RANGE");
+                UARTReplyError("PARAM");
                 return;
             }
-            hour = (uint8_t)value;
-            break;
-        case 1:
-            if (value > 59)
+
+            switch (field_ids[index - field_count])
             {
-                UARTReplyError("RANGE");
-                return;
+            case 0:
+                if (value > 23)
+                {
+                    UARTReplyError("RANGE");
+                    return;
+                }
+                hour = (uint8_t)value;
+                break;
+            case 1:
+                if (value > 59)
+                {
+                    UARTReplyError("RANGE");
+                    return;
+                }
+                minute = (uint8_t)value;
+                break;
+            default:
+                if (value > 59)
+                {
+                    UARTReplyError("RANGE");
+                    return;
+                }
+                second = (uint8_t)value;
+                break;
             }
-            minute = (uint8_t)value;
-            break;
-        default:
-            if (value > 59)
-            {
-                UARTReplyError("RANGE");
-                return;
-            }
-            second = (uint8_t)value;
-            break;
+            index++;
         }
-        index++;
     }
 
     g_now.hour = hour;
@@ -716,6 +869,7 @@ static void HandleSetAlarm(char *tokens[], uint8_t count)
     uint8_t minute = g_alarm_minute;
     uint8_t second = g_alarm_second;
     uint32_t value;
+    uint8_t pair_mode = 0;
 
     if ((count == 1) && MatchToken(tokens[0], "OFF"))
     {
@@ -724,89 +878,163 @@ static void HandleSetAlarm(char *tokens[], uint8_t count)
         return;
     }
 
-    while (index < count)
+    if ((count >= 2) &&
+        (MatchToken(tokens[0], "HOUR") || MatchToken(tokens[0], "MINute") || MatchToken(tokens[0], "SECond")) &&
+        ParseUnsigned(tokens[1], &value))
     {
-        if (MatchToken(tokens[index], "HOUR"))
-        {
-            if (used[0] != 0)
-            {
-                UARTReplyError("PARAM");
-                return;
-            }
-            used[0] = 1;
-            field_ids[field_count++] = 0;
-            index++;
-            continue;
-        }
-        if (MatchToken(tokens[index], "MINute"))
-        {
-            if (used[1] != 0)
-            {
-                UARTReplyError("PARAM");
-                return;
-            }
-            used[1] = 1;
-            field_ids[field_count++] = 1;
-            index++;
-            continue;
-        }
-        if (MatchToken(tokens[index], "SECond"))
-        {
-            if (used[2] != 0)
-            {
-                UARTReplyError("PARAM");
-                return;
-            }
-            used[2] = 1;
-            field_ids[field_count++] = 2;
-            index++;
-            continue;
-        }
-        break;
+        pair_mode = 1;
     }
 
-    if ((field_count == 0) || ((count - index) != field_count))
+    if (pair_mode != 0)
     {
-        UARTReplyError("SYNTAX");
-        return;
-    }
-
-    while (index < count)
-    {
-        if (!ParseUnsigned(tokens[index], &value))
+        while (index < count)
         {
-            UARTReplyError("PARAM");
+            if ((index + 1) >= count)
+            {
+                UARTReplyError("SYNTAX");
+                return;
+            }
+            if (MatchToken(tokens[index], "HOUR"))
+            {
+                if ((used[0] != 0) || !ParseUnsigned(tokens[index + 1], &value))
+                {
+                    UARTReplyError((used[0] != 0) ? "PARAM" : "SYNTAX");
+                    return;
+                }
+                if (value > 23)
+                {
+                    UARTReplyError("RANGE");
+                    return;
+                }
+                hour = (uint8_t)value;
+                used[0] = 1;
+                index += 2;
+                continue;
+            }
+            if (MatchToken(tokens[index], "MINute"))
+            {
+                if ((used[1] != 0) || !ParseUnsigned(tokens[index + 1], &value))
+                {
+                    UARTReplyError((used[1] != 0) ? "PARAM" : "SYNTAX");
+                    return;
+                }
+                if (value > 59)
+                {
+                    UARTReplyError("RANGE");
+                    return;
+                }
+                minute = (uint8_t)value;
+                used[1] = 1;
+                index += 2;
+                continue;
+            }
+            if (MatchToken(tokens[index], "SECond"))
+            {
+                if ((used[2] != 0) || !ParseUnsigned(tokens[index + 1], &value))
+                {
+                    UARTReplyError((used[2] != 0) ? "PARAM" : "SYNTAX");
+                    return;
+                }
+                if (value > 59)
+                {
+                    UARTReplyError("RANGE");
+                    return;
+                }
+                second = (uint8_t)value;
+                used[2] = 1;
+                index += 2;
+                continue;
+            }
+            UARTReplyError("SYNTAX");
+            return;
+        }
+    }
+    else
+    {
+        while (index < count)
+        {
+            if (MatchToken(tokens[index], "HOUR"))
+            {
+                if (used[0] != 0)
+                {
+                    UARTReplyError("PARAM");
+                    return;
+                }
+                used[0] = 1;
+                field_ids[field_count++] = 0;
+                index++;
+                continue;
+            }
+            if (MatchToken(tokens[index], "MINute"))
+            {
+                if (used[1] != 0)
+                {
+                    UARTReplyError("PARAM");
+                    return;
+                }
+                used[1] = 1;
+                field_ids[field_count++] = 1;
+                index++;
+                continue;
+            }
+            if (MatchToken(tokens[index], "SECond"))
+            {
+                if (used[2] != 0)
+                {
+                    UARTReplyError("PARAM");
+                    return;
+                }
+                used[2] = 1;
+                field_ids[field_count++] = 2;
+                index++;
+                continue;
+            }
+            break;
+        }
+
+        if ((field_count == 0) || ((count - index) != field_count))
+        {
+            UARTReplyError("SYNTAX");
             return;
         }
 
-        switch (field_ids[index - field_count])
+        while (index < count)
         {
-        case 0:
-            if (value > 23)
+            if (!ParseUnsigned(tokens[index], &value))
             {
-                UARTReplyError("RANGE");
+                UARTReplyError("PARAM");
                 return;
             }
-            hour = (uint8_t)value;
-            break;
-        case 1:
-            if (value > 59)
+
+            switch (field_ids[index - field_count])
             {
-                UARTReplyError("RANGE");
-                return;
+            case 0:
+                if (value > 23)
+                {
+                    UARTReplyError("RANGE");
+                    return;
+                }
+                hour = (uint8_t)value;
+                break;
+            case 1:
+                if (value > 59)
+                {
+                    UARTReplyError("RANGE");
+                    return;
+                }
+                minute = (uint8_t)value;
+                break;
+            default:
+                if (value > 59)
+                {
+                    UARTReplyError("RANGE");
+                    return;
+                }
+                second = (uint8_t)value;
+                break;
             }
-            minute = (uint8_t)value;
-            break;
-        default:
-            if (value > 59)
-            {
-                UARTReplyError("RANGE");
-                return;
-            }
-            second = (uint8_t)value;
-            break;
+            index++;
         }
-        index++;
     }
 
     g_alarm_hour = hour;
@@ -961,6 +1189,8 @@ static void HandleSetFormat(char *tokens[], uint8_t count)
     if (MatchToken(tokens[0], "LEFT"))
     {
         g_format_left = 1;
+        g_scroll_offset = 0;
+        g_scroll_elapsed_ms = 0;
         g_display_dirty = 1;
         UARTReplyOK(0);
         return;
@@ -968,6 +1198,8 @@ static void HandleSetFormat(char *tokens[], uint8_t count)
     if (MatchToken(tokens[0], "RIGHT"))
     {
         g_format_left = 0;
+        g_scroll_offset = 0;
+        g_scroll_elapsed_ms = 0;
         g_display_dirty = 1;
         UARTReplyOK(0);
         return;
@@ -1214,13 +1446,22 @@ static void UpdateDisplayBuffer(void)
         }
         else
         {
+            int base;
             uint8_t index;
             memset(text, ' ', DISPLAY_DIGITS);
             text[DISPLAY_DIGITS] = '\0';
+            if (g_format_left != 0)
+            {
+                base = (int)g_scroll_offset;
+            }
+            else
+            {
+                base = (int)length - DISPLAY_DIGITS - (int)g_scroll_offset;
+            }
             for (index = 0; index < DISPLAY_DIGITS; index++)
             {
-                uint8_t source = (uint8_t)(g_scroll_offset + index);
-                if (source < length)
+                int source = base + index;
+                if ((source >= 0) && (source < (int)length))
                 {
                     text[index] = g_message[source];
                 }
@@ -1421,6 +1662,8 @@ static void ApplyVirtualKey(const char *name)
     if (MatchToken(name, "FORMAT"))
     {
         g_format_left = (uint8_t)(g_format_left == 0);
+        g_scroll_offset = 0;
+        g_scroll_elapsed_ms = 0;
         g_display_dirty = 1;
         return;
     }
@@ -1428,6 +1671,8 @@ static void ApplyVirtualKey(const char *name)
     if (MatchToken(name, "LEFT"))
     {
         g_format_left = 1;
+        g_scroll_offset = 0;
+        g_scroll_elapsed_ms = 0;
         g_display_dirty = 1;
         return;
     }
@@ -1435,6 +1680,8 @@ static void ApplyVirtualKey(const char *name)
     if (MatchToken(name, "RIGHT"))
     {
         g_format_left = 0;
+        g_scroll_offset = 0;
+        g_scroll_elapsed_ms = 0;
         g_display_dirty = 1;
         return;
     }
@@ -1935,8 +2182,11 @@ void SysTick_Handler(void)
     if (g_beep_remaining_ms != 0)
     {
         g_beep_remaining_ms--;
+        g_beep_output_state = (uint8_t)(g_beep_output_state == 0);
+        GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_1, g_beep_output_state ? GPIO_PIN_1 : 0);
         if (g_beep_remaining_ms == 0)
         {
+            g_beep_output_state = 0;
             GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_1, 0);
         }
     }
@@ -1953,6 +2203,11 @@ void SysTick_Handler(void)
     {
         key_tick = 0;
         g_key_scan_pending = 1;
+    }
+
+    if ((g_display_on != 0) && (g_display_page == 2) && (strlen(g_message) > DISPLAY_DIGITS))
+    {
+        g_scroll_elapsed_ms++;
     }
 
     g_tick_1s++;
