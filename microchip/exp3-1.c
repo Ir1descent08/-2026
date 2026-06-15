@@ -20,6 +20,10 @@
 #define UART_FRAME_MAX_LEN          64
 #define MSG_MAX_LEN                 32
 #define KEY_NAME_MAX_LEN            15
+#define DISPLAY_DIGITS              8
+#define DISPLAY_REFRESH_MS          2
+#define KEY_SCAN_PERIOD_MS          10
+#define KEY_DEBOUNCE_TICKS          2
 #define DEFAULT_YEAR                2026
 #define DEFAULT_MONTH               1
 #define DEFAULT_DATE                1
@@ -27,6 +31,9 @@
 #define DEFAULT_MINUTE              0
 #define DEFAULT_SECOND              0
 #define DEFAULT_ALARM_BEEP_MS       1000
+#define KEY_EVENT_NONE              0
+#define KEY_EVENT_DISP              1
+#define KEY_EVENT_FORMAT            2
 
 #define TCA6424_I2CADDR             0x22
 #define PCA9557_I2CADDR             0x18
@@ -68,6 +75,8 @@ static void UARTReplyError(const char *reason);
 static void ResetClockState(void);
 static void ResetProtocolState(void);
 static void ProcessPendingUart(void);
+static void ProcessDisplayTask(void);
+static void ProcessKeyTask(void);
 static void ProcessCommand(char *line);
 static void HandleSetCommand(char *subcommand, char *cursor);
 static void HandleGetCommand(char *subcommand, char *cursor);
@@ -88,6 +97,14 @@ static void HandleSetKey(char *tokens[], uint8_t count);
 static void HandleSetMsg(char *cursor);
 static void ApplyLedOutput(void);
 static void ApplyDisplayOutput(void);
+static void UpdateDisplayBuffer(void);
+static void FillDisplayText(const char *text);
+static void RefreshDisplayDigit(void);
+static uint8_t EncodeDisplayChar(char c);
+static void SampleBoardKeys(void);
+static void QueueKeyEvent(uint8_t event_code);
+static void EmitKeyEvent(const char *name);
+static void ApplyVirtualKey(const char *name);
 static bool MatchToken(const char *token, const char *pattern);
 static bool ParseUnsigned(const char *token, uint32_t *value);
 static bool ParseHexByte(const char *token, uint8_t *value);
@@ -122,9 +139,22 @@ static volatile uint8_t g_uart_line_overflow;
 static volatile int8_t g_uart_ready_index;
 static volatile uint8_t g_uart_error_len;
 static volatile uint8_t g_uart_error_busy;
+static volatile uint8_t g_display_refresh_pending;
+static volatile uint8_t g_display_dirty;
+static volatile uint8_t g_display_digit_index;
+static volatile uint8_t g_display_page;
+static volatile uint8_t g_key_scan_pending;
+static volatile uint8_t g_pending_key_event;
+static volatile uint8_t g_key_disp_state;
+static volatile uint8_t g_key_format_state;
+static volatile uint8_t g_key_disp_count;
+static volatile uint8_t g_key_format_count;
 static volatile char g_uart_lines[2][UART_FRAME_MAX_LEN + 1];
 static char g_message[MSG_MAX_LEN + 1];
 static char g_last_key[KEY_NAME_MAX_LEN + 1];
+static char g_display_chars[DISPLAY_DIGITS + 1];
+static const uint8_t g_seg7_digits[16] = {0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07,
+                                          0x7f, 0x6f, 0x77, 0x7c, 0x39, 0x5e, 0x79, 0x71};
 
 int main(void)
 {
@@ -148,6 +178,8 @@ int main(void)
     while (1)
     {
         ProcessPendingUart();
+        ProcessKeyTask();
+        ProcessDisplayTask();
     }
 }
 
@@ -199,7 +231,9 @@ static void ResetClockState(void)
     g_alarm_enabled = 0;
     g_display_on = 1;
     g_format_left = 1;
+    g_display_page = 0;
     g_beep_remaining_ms = 0;
+    g_display_dirty = 1;
     GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_1, 0);
 }
 
@@ -208,6 +242,8 @@ static void ResetProtocolState(void)
     memset((void *)g_uart_lines, 0, sizeof(g_uart_lines));
     memset(g_message, 0, sizeof(g_message));
     memset(g_last_key, 0, sizeof(g_last_key));
+    memset(g_display_chars, ' ', DISPLAY_DIGITS);
+    g_display_chars[DISPLAY_DIGITS] = '\0';
     g_uptime_s = 0;
     g_tick_1s = 0;
     g_uart_write_index = 0;
@@ -216,6 +252,15 @@ static void ResetProtocolState(void)
     g_uart_ready_index = -1;
     g_uart_error_len = 0;
     g_uart_error_busy = 0;
+    g_display_refresh_pending = 1;
+    g_display_dirty = 1;
+    g_display_digit_index = 0;
+    g_key_scan_pending = 0;
+    g_pending_key_event = KEY_EVENT_NONE;
+    g_key_disp_state = 0;
+    g_key_format_state = 0;
+    g_key_disp_count = 0;
+    g_key_format_count = 0;
     g_led_value = 0x00;
     g_mode_day = 1;
     ResetClockState();
@@ -543,6 +588,7 @@ static void HandleSetDate(char *tokens[], uint8_t count)
     g_now.year = year;
     g_now.month = month;
     g_now.date = date;
+    g_display_dirty = 1;
     UARTReplyOK(0);
 }
 
@@ -645,6 +691,7 @@ static void HandleSetTime(char *tokens[], uint8_t count)
     g_now.hour = hour;
     g_now.minute = minute;
     g_now.second = second;
+    g_display_dirty = 1;
     UARTReplyOK(0);
 }
 
@@ -875,6 +922,7 @@ static void HandleSetDisplay(char *tokens[], uint8_t count)
     if (MatchToken(tokens[0], "ON"))
     {
         g_display_on = 1;
+        g_display_dirty = 1;
         ApplyDisplayOutput();
         UARTReplyOK(0);
         return;
@@ -882,6 +930,7 @@ static void HandleSetDisplay(char *tokens[], uint8_t count)
     if (MatchToken(tokens[0], "OFF"))
     {
         g_display_on = 0;
+        g_display_dirty = 1;
         ApplyDisplayOutput();
         UARTReplyOK(0);
         return;
@@ -901,12 +950,14 @@ static void HandleSetFormat(char *tokens[], uint8_t count)
     if (MatchToken(tokens[0], "LEFT"))
     {
         g_format_left = 1;
+        g_display_dirty = 1;
         UARTReplyOK(0);
         return;
     }
     if (MatchToken(tokens[0], "RIGHT"))
     {
         g_format_left = 0;
+        g_display_dirty = 1;
         UARTReplyOK(0);
         return;
     }
@@ -925,12 +976,14 @@ static void HandleSetMode(char *tokens[], uint8_t count)
     if (MatchToken(tokens[0], "DAY"))
     {
         g_mode_day = 1;
+        g_display_dirty = 1;
         UARTReplyOK(0);
         return;
     }
     if (MatchToken(tokens[0], "NIGHT"))
     {
         g_mode_day = 0;
+        g_display_dirty = 1;
         UARTReplyOK(0);
         return;
     }
@@ -1025,6 +1078,7 @@ static void HandleSetKey(char *tokens[], uint8_t count)
     }
 
     memcpy(g_last_key, tokens[0], length + 1);
+    ApplyVirtualKey(tokens[0]);
     UARTReplyOK(0);
 }
 
@@ -1046,6 +1100,7 @@ static void HandleSetMsg(char *cursor)
     }
 
     memcpy(g_message, cursor, length + 1);
+    g_display_dirty = 1;
     UARTReplyOK(0);
 }
 
@@ -1060,6 +1115,264 @@ static void ApplyDisplayOutput(void)
     {
         I2C0_WriteByte(TCA6424_I2CADDR, TCA6424_OUTPUT_PORT1, 0x00);
         I2C0_WriteByte(TCA6424_I2CADDR, TCA6424_OUTPUT_PORT2, 0x00);
+        return;
+    }
+
+    g_display_dirty = 1;
+    g_display_refresh_pending = 1;
+}
+
+static void ProcessDisplayTask(void)
+{
+    if (g_display_dirty != 0)
+    {
+        UpdateDisplayBuffer();
+        g_display_dirty = 0;
+    }
+
+    if (g_display_refresh_pending != 0)
+    {
+        g_display_refresh_pending = 0;
+        RefreshDisplayDigit();
+    }
+}
+
+static void ProcessKeyTask(void)
+{
+    uint8_t event_code;
+
+    if (g_key_scan_pending != 0)
+    {
+        g_key_scan_pending = 0;
+        SampleBoardKeys();
+    }
+
+    event_code = g_pending_key_event;
+    if (event_code == KEY_EVENT_NONE)
+    {
+        return;
+    }
+
+    g_pending_key_event = KEY_EVENT_NONE;
+    if (event_code == KEY_EVENT_DISP)
+    {
+        ApplyVirtualKey("DISP");
+        EmitKeyEvent("DISP");
+        return;
+    }
+    if (event_code == KEY_EVENT_FORMAT)
+    {
+        ApplyVirtualKey("FORMAT");
+        EmitKeyEvent("FORMAT");
+    }
+}
+
+static void UpdateDisplayBuffer(void)
+{
+    char text[DISPLAY_DIGITS + 1];
+
+    if (g_display_on == 0)
+    {
+        FillDisplayText("");
+        return;
+    }
+
+    if ((g_display_page == 2) && (g_message[0] != '\0'))
+    {
+        FillDisplayText(g_message);
+        return;
+    }
+
+    if (g_display_page == 1)
+    {
+        snprintf(text, sizeof(text), "%02u%02u%04u", g_now.month, g_now.date, g_now.year);
+        FillDisplayText(text);
+        return;
+    }
+
+    snprintf(text, sizeof(text), "%02u%02u%02u", g_now.hour, g_now.minute, g_now.second);
+    FillDisplayText(text);
+}
+
+static void FillDisplayText(const char *text)
+{
+    size_t length;
+    size_t copy_len;
+    size_t start;
+
+    memset(g_display_chars, ' ', DISPLAY_DIGITS);
+    g_display_chars[DISPLAY_DIGITS] = '\0';
+
+    length = strlen(text);
+    copy_len = (length > DISPLAY_DIGITS) ? DISPLAY_DIGITS : length;
+    start = 0;
+    if ((g_format_left == 0) && (copy_len < DISPLAY_DIGITS))
+    {
+        start = DISPLAY_DIGITS - copy_len;
+    }
+
+    if (copy_len != 0)
+    {
+        memcpy(&g_display_chars[start], text, copy_len);
+    }
+}
+
+static void RefreshDisplayDigit(void)
+{
+    uint8_t index;
+    uint8_t select_mask;
+    uint8_t seg_value;
+
+    if (g_display_on == 0)
+    {
+        I2C0_WriteByte(TCA6424_I2CADDR, TCA6424_OUTPUT_PORT1, 0x00);
+        I2C0_WriteByte(TCA6424_I2CADDR, TCA6424_OUTPUT_PORT2, 0x00);
+        return;
+    }
+
+    index = g_display_digit_index;
+    if (index >= DISPLAY_DIGITS)
+    {
+        index = 0;
+    }
+
+    select_mask = (uint8_t)(1u << index);
+    seg_value = EncodeDisplayChar(g_display_chars[index]);
+    I2C0_WriteByte(TCA6424_I2CADDR, TCA6424_OUTPUT_PORT1, seg_value);
+    I2C0_WriteByte(TCA6424_I2CADDR, TCA6424_OUTPUT_PORT2, select_mask);
+
+    index++;
+    if (index >= DISPLAY_DIGITS)
+    {
+        index = 0;
+    }
+    g_display_digit_index = index;
+}
+
+static uint8_t EncodeDisplayChar(char c)
+{
+    if ((c >= '0') && (c <= '9'))
+    {
+        return g_seg7_digits[c - '0'];
+    }
+
+    c = (char)toupper((unsigned char)c);
+    switch (c)
+    {
+    case 'A':
+        return g_seg7_digits[10];
+    case 'B':
+        return g_seg7_digits[11];
+    case 'C':
+        return g_seg7_digits[12];
+    case 'D':
+        return g_seg7_digits[13];
+    case 'E':
+        return g_seg7_digits[14];
+    case 'F':
+        return g_seg7_digits[15];
+    case 'H':
+        return 0x76;
+    case 'L':
+        return 0x38;
+    case 'N':
+        return 0x54;
+    case 'O':
+        return 0x3f;
+    case 'P':
+        return 0x73;
+    case 'R':
+        return 0x50;
+    case 'T':
+        return 0x78;
+    case 'U':
+        return 0x3e;
+    case 'Y':
+        return 0x6e;
+    case '-':
+        return 0x40;
+    default:
+        return 0x00;
+    }
+}
+
+static void SampleBoardKeys(void)
+{
+    if (GPIOPinRead(GPIO_PORTJ_BASE, GPIO_PIN_0) == 0)
+    {
+        if (g_key_disp_count < KEY_DEBOUNCE_TICKS)
+        {
+            g_key_disp_count++;
+        }
+        else if (g_key_disp_state == 0)
+        {
+            g_key_disp_state = 1;
+            QueueKeyEvent(KEY_EVENT_DISP);
+        }
+    }
+    else
+    {
+        g_key_disp_count = 0;
+        g_key_disp_state = 0;
+    }
+
+    if (GPIOPinRead(GPIO_PORTJ_BASE, GPIO_PIN_1) == 0)
+    {
+        if (g_key_format_count < KEY_DEBOUNCE_TICKS)
+        {
+            g_key_format_count++;
+        }
+        else if (g_key_format_state == 0)
+        {
+            g_key_format_state = 1;
+            QueueKeyEvent(KEY_EVENT_FORMAT);
+        }
+    }
+    else
+    {
+        g_key_format_count = 0;
+        g_key_format_state = 0;
+    }
+}
+
+static void QueueKeyEvent(uint8_t event_code)
+{
+    if (g_pending_key_event == KEY_EVENT_NONE)
+    {
+        g_pending_key_event = event_code;
+    }
+}
+
+static void EmitKeyEvent(const char *name)
+{
+    UARTStringPut("*EVT:KEY ");
+    UARTStringPut(name);
+    UARTStringPut("\r\n");
+}
+
+static void ApplyVirtualKey(const char *name)
+{
+    uint8_t max_page;
+
+    if (MatchToken(name, "DISP") || MatchToken(name, "DISPLAY"))
+    {
+        max_page = (g_message[0] != '\0') ? 2 : 1;
+        if (g_display_page >= max_page)
+        {
+            g_display_page = 0;
+        }
+        else
+        {
+            g_display_page++;
+        }
+        g_display_dirty = 1;
+        return;
+    }
+
+    if (MatchToken(name, "FORMAT"))
+    {
+        g_format_left = (uint8_t)(g_format_left == 0);
+        g_display_dirty = 1;
     }
 }
 
@@ -1332,6 +1645,7 @@ static void AdvanceClockOneSecond(void)
     g_now.second++;
     if (g_now.second < 60)
     {
+        g_display_dirty = 1;
         CheckAlarmTrigger();
         return;
     }
@@ -1340,6 +1654,7 @@ static void AdvanceClockOneSecond(void)
     g_now.minute++;
     if (g_now.minute < 60)
     {
+        g_display_dirty = 1;
         CheckAlarmTrigger();
         return;
     }
@@ -1348,6 +1663,7 @@ static void AdvanceClockOneSecond(void)
     g_now.hour++;
     if (g_now.hour < 24)
     {
+        g_display_dirty = 1;
         CheckAlarmTrigger();
         return;
     }
@@ -1356,6 +1672,7 @@ static void AdvanceClockOneSecond(void)
     g_now.date++;
     if (g_now.date <= DaysInMonth(g_now.year, g_now.month))
     {
+        g_display_dirty = 1;
         CheckAlarmTrigger();
         return;
     }
@@ -1364,12 +1681,14 @@ static void AdvanceClockOneSecond(void)
     g_now.month++;
     if (g_now.month <= 12)
     {
+        g_display_dirty = 1;
         CheckAlarmTrigger();
         return;
     }
 
     g_now.month = 1;
     g_now.year++;
+    g_display_dirty = 1;
     CheckAlarmTrigger();
 }
 
@@ -1498,6 +1817,9 @@ uint8_t I2C0_ReadByte(uint8_t DevAddr, uint8_t RegAddr)
 
 void SysTick_Handler(void)
 {
+    static uint8_t display_tick = 0;
+    static uint8_t key_tick = 0;
+
     if (g_beep_remaining_ms != 0)
     {
         g_beep_remaining_ms--;
@@ -1505,6 +1827,20 @@ void SysTick_Handler(void)
         {
             GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_1, 0);
         }
+    }
+
+    display_tick++;
+    if (display_tick >= DISPLAY_REFRESH_MS)
+    {
+        display_tick = 0;
+        g_display_refresh_pending = 1;
+    }
+
+    key_tick++;
+    if (key_tick >= KEY_SCAN_PERIOD_MS)
+    {
+        key_tick = 0;
+        g_key_scan_pending = 1;
     }
 
     g_tick_1s++;
