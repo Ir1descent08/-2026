@@ -179,7 +179,6 @@ static volatile uint16_t g_scroll_speed_ms;
 static volatile uint16_t g_scroll_elapsed_ms;
 static volatile uint8_t g_scroll_offset;
 static volatile uint8_t g_beep_output_state;
-static volatile uint8_t g_beep_pwm_ready;
 static volatile char g_uart_lines[2][UART_FRAME_MAX_LEN + 1];
 static char g_message[MSG_MAX_LEN + 1];
 static char g_last_key[KEY_NAME_MAX_LEN + 1];
@@ -197,6 +196,7 @@ int main(void)
 
     S800_GPIO_Init();
     S800_I2C0_Init();
+    S800_PWM_Init();
     S800_UART_Init();
     ResetProtocolState();
     ApplyLedOutput();
@@ -250,16 +250,7 @@ static void UARTReplyError(const char *reason)
 
 static void SetBeepOutput(uint8_t enabled)
 {
-    if ((enabled != 0) && (g_beep_pwm_ready == 0))
-    {
-        S800_PWM_Init();
-        g_beep_pwm_ready = 1;
-    }
-
-    if (g_beep_pwm_ready != 0)
-    {
-        PWMOutputState(PWM0_BASE, PWM_OUT_7_BIT, (enabled != 0) ? true : false);
-    }
+    PWMOutputState(PWM0_BASE, PWM_OUT_7_BIT, (enabled != 0) ? true : false);
 }
 
 static void ResetClockState(void)
@@ -1758,6 +1749,15 @@ static uint8_t EncodeDisplayChar(char c)
 
 static void SampleBoardKeys(void)
 {
+    static const uint8_t event_map[8] = {
+        KEY_EVENT_FUNC, KEY_EVENT_SAVE, KEY_EVENT_DISP, KEY_EVENT_SPEED,
+        KEY_EVENT_FORMAT, KEY_EVENT_EXT, KEY_EVENT_SHIFT, KEY_EVENT_ADD
+    };
+    uint8_t port_value;
+    uint8_t active_mask;
+    uint8_t key_mask;
+    uint8_t index;
+
     if (GPIOPinRead(GPIO_PORTJ_BASE, GPIO_PIN_0) == 0)
     {
         if (g_key_disp_count < KEY_DEBOUNCE_TICKS)
@@ -1792,6 +1792,39 @@ static void SampleBoardKeys(void)
     {
         g_key_format_count = 0;
         g_key_format_state = 0;
+    }
+
+    port_value = I2C0_ReadByte(TCA6424_I2CADDR, TCA6424_INPUT_PORT0);
+    if (g_board_key_initialized == 0)
+    {
+        g_board_key_initialized = 1;
+        g_board_key_idle_mask = port_value;
+        g_board_key_state_mask = 0;
+        memset((void *)g_board_key_count, 0, sizeof(g_board_key_count));
+        return;
+    }
+
+    active_mask = (uint8_t)(port_value ^ g_board_key_idle_mask);
+    for (index = 0; index < 8; index++)
+    {
+        key_mask = (uint8_t)(1u << index);
+        if ((active_mask & key_mask) != 0)
+        {
+            if (g_board_key_count[index] < KEY_DEBOUNCE_TICKS)
+            {
+                g_board_key_count[index]++;
+            }
+            else if ((g_board_key_state_mask & key_mask) == 0)
+            {
+                g_board_key_state_mask |= key_mask;
+                QueueKeyEvent(event_map[index]);
+            }
+        }
+        else
+        {
+            g_board_key_count[index] = 0;
+            g_board_key_state_mask &= (uint8_t)(~key_mask);
+        }
     }
 }
 
