@@ -1909,8 +1909,7 @@ static void ApplyVirtualKey(const char *name)
 
     if (MatchToken(name, "SHIFT"))
     {
-        g_display_on = (uint8_t)(g_display_on == 0);
-        ApplyDisplayOutput();
+        g_display_dirty = 1;
         return;
     }
 
