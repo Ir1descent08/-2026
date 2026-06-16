@@ -15,6 +15,7 @@
 #include "interrupt.h"
 #include "uart.h"
 #include "hw_ints.h"
+#include "pwm.h"
 
 #define SYSTICK_FREQUENCY           1000
 #define UART_FRAME_MAX_LEN          64
@@ -28,6 +29,7 @@
 #define SCROLL_MEDIUM_MS            300
 #define SCROLL_FAST_MS              150
 #define BOOT_SPLASH_MS              1500
+#define BEEP_PWM_PERIOD             8000
 #define DEFAULT_YEAR                2026
 #define DEFAULT_MONTH               1
 #define DEFAULT_DATE                1
@@ -36,14 +38,16 @@
 #define DEFAULT_SECOND              0
 #define DEFAULT_ALARM_BEEP_MS       1000
 #define KEY_EVENT_NONE              0
-#define KEY_EVENT_DISP              1
-#define KEY_EVENT_FORMAT            2
+#define KEY_EVENT_PANEL_DISP        1
+#define KEY_EVENT_PANEL_FORMAT      2
 #define KEY_EVENT_FUNC              3
 #define KEY_EVENT_SAVE              4
-#define KEY_EVENT_SPEED             5
-#define KEY_EVENT_EXT               6
-#define KEY_EVENT_SHIFT             7
-#define KEY_EVENT_ADD               8
+#define KEY_EVENT_DISP              5
+#define KEY_EVENT_SPEED             6
+#define KEY_EVENT_FORMAT            7
+#define KEY_EVENT_EXT               8
+#define KEY_EVENT_SHIFT             9
+#define KEY_EVENT_ADD               10
 
 #define TCA6424_I2CADDR             0x22
 #define PCA9557_I2CADDR             0x18
@@ -77,12 +81,14 @@ uint8_t I2C0_WriteByte(uint8_t DevAddr, uint8_t RegAddr, uint8_t WriteData);
 uint8_t I2C0_ReadByte(uint8_t DevAddr, uint8_t RegAddr);
 void S800_I2C0_Init(void);
 void S800_UART_Init(void);
+void S800_PWM_Init(void);
 void SysTick_Handler(void);
 void UART0_Handler(void);
 
 static void UARTStringPut(const char *message);
 static void UARTReplyOK(const char *data);
 static void UARTReplyError(const char *reason);
+static void SetBeepOutput(uint8_t enabled);
 static void ResetClockState(void);
 static void ResetProtocolState(void);
 static void ProcessPendingUart(void);
@@ -164,6 +170,8 @@ static volatile uint8_t g_key_disp_state;
 static volatile uint8_t g_key_format_state;
 static volatile uint8_t g_key_disp_count;
 static volatile uint8_t g_key_format_count;
+static volatile uint8_t g_board_key_initialized;
+static volatile uint8_t g_board_key_idle_mask;
 static volatile uint8_t g_board_key_state_mask;
 static volatile uint8_t g_board_key_count[8];
 static volatile uint16_t g_boot_splash_ms;
@@ -188,6 +196,7 @@ int main(void)
 
     S800_GPIO_Init();
     S800_I2C0_Init();
+    S800_PWM_Init();
     S800_UART_Init();
     ResetProtocolState();
     ApplyLedOutput();
@@ -239,6 +248,11 @@ static void UARTReplyError(const char *reason)
     UARTStringPut("\r\n");
 }
 
+static void SetBeepOutput(uint8_t enabled)
+{
+    PWMOutputState(PWM0_BASE, PWM_OUT_7_BIT, (enabled != 0) ? true : false);
+}
+
 static void ResetClockState(void)
 {
     g_now.year = DEFAULT_YEAR;
@@ -261,7 +275,7 @@ static void ResetClockState(void)
     g_scroll_elapsed_ms = 0;
     g_scroll_offset = 0;
     g_beep_output_state = 0;
-    GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_1, 0);
+    SetBeepOutput(0);
 }
 
 static void ResetProtocolState(void)
@@ -289,6 +303,8 @@ static void ResetProtocolState(void)
     g_key_format_state = 0;
     g_key_disp_count = 0;
     g_key_format_count = 0;
+    g_board_key_initialized = 0;
+    g_board_key_idle_mask = 0;
     g_board_key_state_mask = 0;
     g_boot_splash_ms = BOOT_SPLASH_MS;
     g_scroll_elapsed_ms = 0;
@@ -1341,7 +1357,8 @@ static void HandleSetBeep(char *tokens[], uint8_t count)
     }
 
     g_beep_remaining_ms = (uint16_t)value;
-    GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_1, GPIO_PIN_1);
+    g_beep_output_state = 1;
+    SetBeepOutput(1);
     UARTReplyOK(0);
 }
 
@@ -1454,13 +1471,13 @@ static void ProcessKeyTask(void)
     }
 
     g_pending_key_event = KEY_EVENT_NONE;
-    if (event_code == KEY_EVENT_DISP)
+    if (event_code == KEY_EVENT_PANEL_DISP)
     {
         ApplyVirtualKey("DISP");
         EmitKeyEvent("DISP");
         return;
     }
-    if (event_code == KEY_EVENT_FORMAT)
+    if (event_code == KEY_EVENT_PANEL_FORMAT)
     {
         ApplyVirtualKey("FORMAT");
         EmitKeyEvent("FORMAT");
@@ -1468,37 +1485,41 @@ static void ProcessKeyTask(void)
     }
     if (event_code == KEY_EVENT_FUNC)
     {
-        ApplyVirtualKey("FUNC");
         EmitKeyEvent("FUNC");
         return;
     }
     if (event_code == KEY_EVENT_SAVE)
     {
-        ApplyVirtualKey("SAVE");
         EmitKeyEvent("SAVE");
+        return;
+    }
+    if (event_code == KEY_EVENT_DISP)
+    {
+        EmitKeyEvent("DISP");
         return;
     }
     if (event_code == KEY_EVENT_SPEED)
     {
-        ApplyVirtualKey("SPEED");
         EmitKeyEvent("SPEED");
+        return;
+    }
+    if (event_code == KEY_EVENT_FORMAT)
+    {
+        EmitKeyEvent("FORMAT");
         return;
     }
     if (event_code == KEY_EVENT_EXT)
     {
-        ApplyVirtualKey("EXT");
         EmitKeyEvent("EXT");
         return;
     }
     if (event_code == KEY_EVENT_SHIFT)
     {
-        ApplyVirtualKey("SHIFT");
         EmitKeyEvent("SHIFT");
         return;
     }
     if (event_code == KEY_EVENT_ADD)
     {
-        ApplyVirtualKey("ADD");
         EmitKeyEvent("ADD");
     }
 }
@@ -1733,6 +1754,7 @@ static void SampleBoardKeys(void)
         KEY_EVENT_FORMAT, KEY_EVENT_EXT, KEY_EVENT_SHIFT, KEY_EVENT_ADD
     };
     uint8_t port_value;
+    uint8_t active_mask;
     uint8_t key_mask;
     uint8_t index;
 
@@ -1745,7 +1767,7 @@ static void SampleBoardKeys(void)
         else if (g_key_disp_state == 0)
         {
             g_key_disp_state = 1;
-            QueueKeyEvent(KEY_EVENT_DISP);
+            QueueKeyEvent(KEY_EVENT_PANEL_DISP);
         }
     }
     else
@@ -1763,7 +1785,7 @@ static void SampleBoardKeys(void)
         else if (g_key_format_state == 0)
         {
             g_key_format_state = 1;
-            QueueKeyEvent(KEY_EVENT_FORMAT);
+            QueueKeyEvent(KEY_EVENT_PANEL_FORMAT);
         }
     }
     else
@@ -1772,11 +1794,21 @@ static void SampleBoardKeys(void)
         g_key_format_state = 0;
     }
 
-    port_value = (uint8_t)(~I2C0_ReadByte(TCA6424_I2CADDR, TCA6424_INPUT_PORT0));
+    port_value = I2C0_ReadByte(TCA6424_I2CADDR, TCA6424_INPUT_PORT0);
+    if (g_board_key_initialized == 0)
+    {
+        g_board_key_initialized = 1;
+        g_board_key_idle_mask = port_value;
+        g_board_key_state_mask = 0;
+        memset((void *)g_board_key_count, 0, sizeof(g_board_key_count));
+        return;
+    }
+
+    active_mask = (uint8_t)(port_value ^ g_board_key_idle_mask);
     for (index = 0; index < 8; index++)
     {
         key_mask = (uint8_t)(1u << index);
-        if ((port_value & key_mask) != 0)
+        if ((active_mask & key_mask) != 0)
         {
             if (g_board_key_count[index] < KEY_DEBOUNCE_TICKS)
             {
@@ -1917,7 +1949,7 @@ static void ApplyVirtualKey(const char *name)
     {
         g_beep_remaining_ms = 200;
         g_beep_output_state = 1;
-        GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_1, GPIO_PIN_1);
+        SetBeepOutput(1);
         return;
     }
 }
@@ -2246,8 +2278,30 @@ static void CheckAlarmTrigger(void)
         (g_now.second == g_alarm_second))
     {
         g_beep_remaining_ms = DEFAULT_ALARM_BEEP_MS;
-        GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_1, GPIO_PIN_1);
+        g_beep_output_state = 1;
+        SetBeepOutput(1);
     }
+}
+
+void S800_PWM_Init(void)
+{
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOK);
+    while (!SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOK))
+    {
+    }
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_PWM0);
+    while (!SysCtlPeripheralReady(SYSCTL_PERIPH_PWM0))
+    {
+    }
+
+    GPIOPinConfigure(GPIO_PK5_M0PWM7);
+    GPIOPinTypePWM(GPIO_PORTK_BASE, GPIO_PIN_5);
+    PWMClockSet(PWM0_BASE, PWM_SYSCLK_DIV_1);
+    PWMGenConfigure(PWM0_BASE, PWM_GEN_3, PWM_GEN_MODE_DOWN | PWM_GEN_MODE_NO_SYNC);
+    PWMGenPeriodSet(PWM0_BASE, PWM_GEN_3, BEEP_PWM_PERIOD);
+    PWMPulseWidthSet(PWM0_BASE, PWM_OUT_7, BEEP_PWM_PERIOD / 4);
+    PWMGenEnable(PWM0_BASE, PWM_GEN_3);
+    SetBeepOutput(0);
 }
 
 void S800_UART_Init(void)
@@ -2282,9 +2336,8 @@ void S800_GPIO_Init(void)
 
     GPIOPinTypeGPIOOutput(GPIO_PORTF_BASE, GPIO_PIN_0);
     GPIOPinTypeGPIOOutput(GPIO_PORTN_BASE, GPIO_PIN_0);
-    GPIOPinTypeGPIOOutput(GPIO_PORTN_BASE, GPIO_PIN_1);
     GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_0, 0);
-    GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_0 | GPIO_PIN_1, 0);
+    GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_0, 0);
 
     GPIOPinTypeGPIOInput(GPIO_PORTJ_BASE, GPIO_PIN_0 | GPIO_PIN_1);
     GPIOPadConfigSet(GPIO_PORTJ_BASE, GPIO_PIN_0 | GPIO_PIN_1, GPIO_STRENGTH_2MA, GPIO_PIN_TYPE_STD_WPU);
@@ -2369,12 +2422,10 @@ void SysTick_Handler(void)
     if (g_beep_remaining_ms != 0)
     {
         g_beep_remaining_ms--;
-        g_beep_output_state = (uint8_t)(g_beep_output_state == 0);
-        GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_1, g_beep_output_state ? GPIO_PIN_1 : 0);
         if (g_beep_remaining_ms == 0)
         {
             g_beep_output_state = 0;
-            GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_1, 0);
+            SetBeepOutput(0);
         }
     }
 
