@@ -27,6 +27,7 @@
 #define SCROLL_SLOW_MS              600
 #define SCROLL_MEDIUM_MS            300
 #define SCROLL_FAST_MS              150
+#define BOOT_SPLASH_MS              1500
 #define DEFAULT_YEAR                2026
 #define DEFAULT_MONTH               1
 #define DEFAULT_DATE                1
@@ -37,10 +38,17 @@
 #define KEY_EVENT_NONE              0
 #define KEY_EVENT_DISP              1
 #define KEY_EVENT_FORMAT            2
+#define KEY_EVENT_FUNC              3
+#define KEY_EVENT_SAVE              4
+#define KEY_EVENT_SPEED             5
+#define KEY_EVENT_EXT               6
+#define KEY_EVENT_SHIFT             7
+#define KEY_EVENT_ADD               8
 
 #define TCA6424_I2CADDR             0x22
 #define PCA9557_I2CADDR             0x18
 
+#define TCA6424_INPUT_PORT0         0x00
 #define PCA9557_INPUT               0x00
 #define PCA9557_OUTPUT              0x01
 #define PCA9557_POLINVERT           0x02
@@ -102,6 +110,10 @@ static void ApplyLedOutput(void);
 static void ApplyDisplayOutput(void);
 static void UpdateDisplayBuffer(void);
 static void FillDisplayText(const char *text);
+static void ReverseText(char *text);
+static void BuildCompactDateText(char *text, size_t size);
+static void BuildCompactTimeText(char *text, size_t size);
+static void BuildCompactAlarmText(char *text, size_t size);
 static void RefreshDisplayDigit(void);
 static uint8_t EncodeDisplayChar(char c);
 static void SampleBoardKeys(void);
@@ -152,6 +164,9 @@ static volatile uint8_t g_key_disp_state;
 static volatile uint8_t g_key_format_state;
 static volatile uint8_t g_key_disp_count;
 static volatile uint8_t g_key_format_count;
+static volatile uint8_t g_board_key_state_mask;
+static volatile uint8_t g_board_key_count[8];
+static volatile uint16_t g_boot_splash_ms;
 static volatile uint16_t g_scroll_speed_ms;
 static volatile uint16_t g_scroll_elapsed_ms;
 static volatile uint8_t g_scroll_offset;
@@ -239,6 +254,7 @@ static void ResetClockState(void)
     g_display_on = 1;
     g_format_left = 1;
     g_display_page = 0;
+    g_boot_splash_ms = BOOT_SPLASH_MS;
     g_beep_remaining_ms = 0;
     g_display_dirty = 1;
     g_scroll_speed_ms = SCROLL_MEDIUM_MS;
@@ -254,6 +270,7 @@ static void ResetProtocolState(void)
     memset(g_message, 0, sizeof(g_message));
     memset(g_last_key, 0, sizeof(g_last_key));
     memset(g_display_chars, ' ', DISPLAY_DIGITS);
+    memset((void *)g_board_key_count, 0, sizeof(g_board_key_count));
     g_display_chars[DISPLAY_DIGITS] = '\0';
     g_uptime_s = 0;
     g_tick_1s = 0;
@@ -272,6 +289,8 @@ static void ResetProtocolState(void)
     g_key_format_state = 0;
     g_key_disp_count = 0;
     g_key_format_count = 0;
+    g_board_key_state_mask = 0;
+    g_boot_splash_ms = BOOT_SPLASH_MS;
     g_scroll_elapsed_ms = 0;
     g_scroll_offset = 0;
     g_beep_output_state = 0;
@@ -1061,6 +1080,13 @@ static void HandleGetDate(char *tokens[], uint8_t count)
     now.month = g_now.month;
     now.date = g_now.date;
 
+    if (count == 0)
+    {
+        BuildCompactDateText(response, sizeof(response));
+        UARTReplyOK(response);
+        return;
+    }
+
     if (selected[0])
     {
         offset += (uint8_t)snprintf(response + offset, sizeof(response) - offset, "YEAR %04u", now.year);
@@ -1093,6 +1119,13 @@ static void HandleGetTime(char *tokens[], uint8_t count)
     now.hour = g_now.hour;
     now.minute = g_now.minute;
     now.second = g_now.second;
+
+    if (count == 0)
+    {
+        BuildCompactTimeText(response, sizeof(response));
+        UARTReplyOK(response);
+        return;
+    }
 
     if (selected[0])
     {
@@ -1131,6 +1164,13 @@ static void HandleGetAlarm(char *tokens[], uint8_t count)
     if (g_alarm_enabled == 0)
     {
         UARTReplyOK("OFF");
+        return;
+    }
+
+    if (count == 0)
+    {
+        BuildCompactAlarmText(response, sizeof(response));
+        UARTReplyOK(response);
         return;
     }
 
@@ -1424,6 +1464,42 @@ static void ProcessKeyTask(void)
     {
         ApplyVirtualKey("FORMAT");
         EmitKeyEvent("FORMAT");
+        return;
+    }
+    if (event_code == KEY_EVENT_FUNC)
+    {
+        ApplyVirtualKey("FUNC");
+        EmitKeyEvent("FUNC");
+        return;
+    }
+    if (event_code == KEY_EVENT_SAVE)
+    {
+        ApplyVirtualKey("SAVE");
+        EmitKeyEvent("SAVE");
+        return;
+    }
+    if (event_code == KEY_EVENT_SPEED)
+    {
+        ApplyVirtualKey("SPEED");
+        EmitKeyEvent("SPEED");
+        return;
+    }
+    if (event_code == KEY_EVENT_EXT)
+    {
+        ApplyVirtualKey("EXT");
+        EmitKeyEvent("EXT");
+        return;
+    }
+    if (event_code == KEY_EVENT_SHIFT)
+    {
+        ApplyVirtualKey("SHIFT");
+        EmitKeyEvent("SHIFT");
+        return;
+    }
+    if (event_code == KEY_EVENT_ADD)
+    {
+        ApplyVirtualKey("ADD");
+        EmitKeyEvent("ADD");
     }
 }
 
@@ -1434,6 +1510,12 @@ static void UpdateDisplayBuffer(void)
     if (g_display_on == 0)
     {
         FillDisplayText("");
+        return;
+    }
+
+    if (g_boot_splash_ms != 0)
+    {
+        FillDisplayText("HELLO");
         return;
     }
 
@@ -1473,12 +1555,12 @@ static void UpdateDisplayBuffer(void)
 
     if (g_display_page == 1)
     {
-        snprintf(text, sizeof(text), "%02u-%02u-%02u", g_now.month, g_now.date, g_now.year % 100);
+        BuildCompactDateText(text, sizeof(text));
         FillDisplayText(text);
         return;
     }
 
-    snprintf(text, sizeof(text), "%02u-%02u-%02u", g_now.hour, g_now.minute, g_now.second);
+    BuildCompactTimeText(text, sizeof(text));
     FillDisplayText(text);
 }
 
@@ -1505,6 +1587,60 @@ static void FillDisplayText(const char *text)
     }
 }
 
+static void ReverseText(char *text)
+{
+    size_t left = 0;
+    size_t right = strlen(text);
+
+    if (right == 0)
+    {
+        return;
+    }
+
+    right--;
+    while (left < right)
+    {
+        char temp = text[left];
+        text[left] = text[right];
+        text[right] = temp;
+        left++;
+        right--;
+    }
+}
+
+static void BuildCompactDateText(char *text, size_t size)
+{
+    snprintf(text, size, "%02u.%02u.%02u", g_now.month, g_now.date, g_now.year % 100);
+    if (g_format_left == 0)
+    {
+        ReverseText(text);
+    }
+}
+
+static void BuildCompactTimeText(char *text, size_t size)
+{
+    snprintf(text, size, "%02u.%02u.%02u", g_now.hour, g_now.minute, g_now.second);
+    if (g_format_left == 0)
+    {
+        ReverseText(text);
+    }
+}
+
+static void BuildCompactAlarmText(char *text, size_t size)
+{
+    if (g_alarm_enabled == 0)
+    {
+        snprintf(text, size, "OFF");
+        return;
+    }
+
+    snprintf(text, size, "%02u.%02u.%02u", g_alarm_hour, g_alarm_minute, g_alarm_second);
+    if (g_format_left == 0)
+    {
+        ReverseText(text);
+    }
+}
+
 static void RefreshDisplayDigit(void)
 {
     uint8_t index;
@@ -1526,6 +1662,8 @@ static void RefreshDisplayDigit(void)
 
     select_mask = (uint8_t)(1u << index);
     seg_value = EncodeDisplayChar(g_display_chars[index]);
+    I2C0_WriteByte(TCA6424_I2CADDR, TCA6424_OUTPUT_PORT2, 0x00);
+    I2C0_WriteByte(TCA6424_I2CADDR, TCA6424_OUTPUT_PORT1, 0x00);
     I2C0_WriteByte(TCA6424_I2CADDR, TCA6424_OUTPUT_PORT1, seg_value);
     I2C0_WriteByte(TCA6424_I2CADDR, TCA6424_OUTPUT_PORT2, select_mask);
 
@@ -1575,10 +1713,14 @@ static uint8_t EncodeDisplayChar(char c)
         return 0x78;
     case 'U':
         return 0x3e;
+    case 'W':
+        return 0x3e;
     case 'Y':
         return 0x6e;
     case '-':
         return 0x40;
+    case '.':
+        return 0x80;
     default:
         return 0x00;
     }
@@ -1586,6 +1728,14 @@ static uint8_t EncodeDisplayChar(char c)
 
 static void SampleBoardKeys(void)
 {
+    static const uint8_t event_map[8] = {
+        KEY_EVENT_FUNC, KEY_EVENT_SAVE, KEY_EVENT_DISP, KEY_EVENT_SPEED,
+        KEY_EVENT_FORMAT, KEY_EVENT_EXT, KEY_EVENT_SHIFT, KEY_EVENT_ADD
+    };
+    uint8_t port_value;
+    uint8_t key_mask;
+    uint8_t index;
+
     if (GPIOPinRead(GPIO_PORTJ_BASE, GPIO_PIN_0) == 0)
     {
         if (g_key_disp_count < KEY_DEBOUNCE_TICKS)
@@ -1620,6 +1770,29 @@ static void SampleBoardKeys(void)
     {
         g_key_format_count = 0;
         g_key_format_state = 0;
+    }
+
+    port_value = (uint8_t)(~I2C0_ReadByte(TCA6424_I2CADDR, TCA6424_INPUT_PORT0));
+    for (index = 0; index < 8; index++)
+    {
+        key_mask = (uint8_t)(1u << index);
+        if ((port_value & key_mask) != 0)
+        {
+            if (g_board_key_count[index] < KEY_DEBOUNCE_TICKS)
+            {
+                g_board_key_count[index]++;
+            }
+            else if ((g_board_key_state_mask & key_mask) == 0)
+            {
+                g_board_key_state_mask |= key_mask;
+                QueueKeyEvent(event_map[index]);
+            }
+        }
+        else
+        {
+            g_board_key_count[index] = 0;
+            g_board_key_state_mask &= (uint8_t)(~key_mask);
+        }
     }
 }
 
@@ -1686,7 +1859,7 @@ static void ApplyVirtualKey(const char *name)
         return;
     }
 
-    if (MatchToken(name, "TIME") || MatchToken(name, "USER1"))
+    if (MatchToken(name, "TIME") || MatchToken(name, "USER1") || MatchToken(name, "FUNC"))
     {
         g_display_page = 0;
         g_scroll_offset = 0;
@@ -1695,7 +1868,7 @@ static void ApplyVirtualKey(const char *name)
         return;
     }
 
-    if (MatchToken(name, "DATE") || MatchToken(name, "USER2"))
+    if (MatchToken(name, "DATE") || MatchToken(name, "USER2") || MatchToken(name, "SAVE"))
     {
         g_display_page = 1;
         g_scroll_offset = 0;
@@ -1704,7 +1877,7 @@ static void ApplyVirtualKey(const char *name)
         return;
     }
 
-    if (MatchToken(name, "MSG"))
+    if (MatchToken(name, "MSG") || MatchToken(name, "EXT"))
     {
         if (g_message[0] != '\0')
         {
@@ -1731,6 +1904,21 @@ static void ApplyVirtualKey(const char *name)
             g_scroll_speed_ms = SCROLL_SLOW_MS;
         }
         g_scroll_elapsed_ms = 0;
+        return;
+    }
+
+    if (MatchToken(name, "SHIFT"))
+    {
+        g_display_on = (uint8_t)(g_display_on == 0);
+        ApplyDisplayOutput();
+        return;
+    }
+
+    if (MatchToken(name, "ADD"))
+    {
+        g_beep_remaining_ms = 200;
+        g_beep_output_state = 1;
+        GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_1, GPIO_PIN_1);
         return;
     }
 }
@@ -2208,6 +2396,15 @@ void SysTick_Handler(void)
     if ((g_display_on != 0) && (g_display_page == 2) && (strlen(g_message) > DISPLAY_DIGITS))
     {
         g_scroll_elapsed_ms++;
+    }
+
+    if (g_boot_splash_ms != 0)
+    {
+        g_boot_splash_ms--;
+        if (g_boot_splash_ms == 0)
+        {
+            g_display_dirty = 1;
+        }
     }
 
     g_tick_1s++;
