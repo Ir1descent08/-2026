@@ -28,7 +28,19 @@
 #define SCROLL_SLOW_MS              600
 #define SCROLL_MEDIUM_MS            300
 #define SCROLL_FAST_MS              150
-#define BOOT_SPLASH_MS              1500
+#define BOOT_BLINK_MS               300
+#define BOOT_VERSION_MS             1000
+#define BOOT_PHASE_DONE             0
+#define BOOT_PHASE_ALL_ON           1
+#define BOOT_PHASE_ALL_OFF          2
+#define BOOT_PHASE_ID_ON            3
+#define BOOT_PHASE_ID_OFF           4
+#define BOOT_PHASE_NAME_ON          5
+#define BOOT_PHASE_NAME_OFF         6
+#define BOOT_PHASE_VERSION          7
+#define BOOT_ID_TEXT                "12345678"
+#define BOOT_NAME_TEXT              "FANSIZHE"
+#define BOOT_VERSION_TEXT           "0.0.1"
 #define BEEP_PWM_PERIOD             8000
 #define DEFAULT_YEAR                2026
 #define DEFAULT_MONTH               1
@@ -114,6 +126,7 @@ static void HandleSetKey(char *tokens[], uint8_t count);
 static void HandleSetMsg(char *cursor);
 static void ApplyLedOutput(void);
 static void ApplyDisplayOutput(void);
+static void AdvanceBootSequence(void);
 static void UpdateDisplayBuffer(void);
 static void FillDisplayText(const char *text);
 static void ReverseText(char *text);
@@ -171,14 +184,15 @@ static volatile uint8_t g_key_format_state;
 static volatile uint8_t g_key_disp_count;
 static volatile uint8_t g_key_format_count;
 static volatile uint8_t g_board_key_initialized;
-static volatile uint8_t g_board_key_idle_mask;
 static volatile uint8_t g_board_key_state_mask;
 static volatile uint8_t g_board_key_count[8];
+static volatile uint8_t g_boot_phase;
 static volatile uint16_t g_boot_splash_ms;
 static volatile uint16_t g_scroll_speed_ms;
 static volatile uint16_t g_scroll_elapsed_ms;
 static volatile uint8_t g_scroll_offset;
 static volatile uint8_t g_beep_output_state;
+static volatile uint8_t g_display_dot_mask;
 static volatile char g_uart_lines[2][UART_FRAME_MAX_LEN + 1];
 static char g_message[MSG_MAX_LEN + 1];
 static char g_last_key[KEY_NAME_MAX_LEN + 1];
@@ -268,7 +282,9 @@ static void ResetClockState(void)
     g_display_on = 1;
     g_format_left = 1;
     g_display_page = 0;
-    g_boot_splash_ms = BOOT_SPLASH_MS;
+    g_boot_phase = BOOT_PHASE_ALL_ON;
+    g_boot_splash_ms = BOOT_BLINK_MS;
+    g_led_value = 0xff;
     g_beep_remaining_ms = 0;
     g_display_dirty = 1;
     g_scroll_speed_ms = SCROLL_MEDIUM_MS;
@@ -286,6 +302,7 @@ static void ResetProtocolState(void)
     memset(g_display_chars, ' ', DISPLAY_DIGITS);
     memset((void *)g_board_key_count, 0, sizeof(g_board_key_count));
     g_display_chars[DISPLAY_DIGITS] = '\0';
+    g_display_dot_mask = 0;
     g_uptime_s = 0;
     g_tick_1s = 0;
     g_uart_write_index = 0;
@@ -304,13 +321,11 @@ static void ResetProtocolState(void)
     g_key_disp_count = 0;
     g_key_format_count = 0;
     g_board_key_initialized = 0;
-    g_board_key_idle_mask = 0;
     g_board_key_state_mask = 0;
-    g_boot_splash_ms = BOOT_SPLASH_MS;
+    g_boot_splash_ms = BOOT_BLINK_MS;
     g_scroll_elapsed_ms = 0;
     g_scroll_offset = 0;
     g_beep_output_state = 0;
-    g_led_value = 0x00;
     g_mode_day = 1;
     ResetClockState();
 }
@@ -1098,7 +1113,11 @@ static void HandleGetDate(char *tokens[], uint8_t count)
 
     if (count == 0)
     {
-        BuildCompactDateText(response, sizeof(response));
+        snprintf(response, sizeof(response), "%04u.%02u.%02u", now.year, now.month, now.date);
+        if (g_format_left == 0)
+        {
+            ReverseText(response);
+        }
         UARTReplyOK(response);
         return;
     }
@@ -1426,6 +1445,56 @@ static void ApplyDisplayOutput(void)
     g_display_refresh_pending = 1;
 }
 
+static void AdvanceBootSequence(void)
+{
+    switch (g_boot_phase)
+    {
+    case BOOT_PHASE_ALL_ON:
+        g_boot_phase = BOOT_PHASE_ALL_OFF;
+        g_boot_splash_ms = BOOT_BLINK_MS;
+        g_led_value = 0x00;
+        break;
+    case BOOT_PHASE_ALL_OFF:
+        g_boot_phase = BOOT_PHASE_ID_ON;
+        g_boot_splash_ms = BOOT_BLINK_MS;
+        g_led_value = 0xff;
+        break;
+    case BOOT_PHASE_ID_ON:
+        g_boot_phase = BOOT_PHASE_ID_OFF;
+        g_boot_splash_ms = BOOT_BLINK_MS;
+        g_led_value = 0x00;
+        break;
+    case BOOT_PHASE_ID_OFF:
+        g_boot_phase = BOOT_PHASE_NAME_ON;
+        g_boot_splash_ms = BOOT_BLINK_MS;
+        g_led_value = 0xff;
+        break;
+    case BOOT_PHASE_NAME_ON:
+        g_boot_phase = BOOT_PHASE_NAME_OFF;
+        g_boot_splash_ms = BOOT_BLINK_MS;
+        g_led_value = 0x00;
+        break;
+    case BOOT_PHASE_NAME_OFF:
+        g_boot_phase = BOOT_PHASE_VERSION;
+        g_boot_splash_ms = BOOT_VERSION_MS;
+        g_led_value = 0x00;
+        break;
+    case BOOT_PHASE_VERSION:
+        g_boot_phase = BOOT_PHASE_DONE;
+        g_boot_splash_ms = 0;
+        g_led_value = 0x00;
+        break;
+    default:
+        g_boot_phase = BOOT_PHASE_DONE;
+        g_boot_splash_ms = 0;
+        g_led_value = 0x00;
+        break;
+    }
+
+    ApplyLedOutput();
+    g_display_dirty = 1;
+}
+
 static void ProcessDisplayTask(void)
 {
     if ((g_display_on != 0) && (g_display_page == 2) && (strlen(g_message) > DISPLAY_DIGITS) &&
@@ -1485,41 +1554,49 @@ static void ProcessKeyTask(void)
     }
     if (event_code == KEY_EVENT_FUNC)
     {
+        ApplyVirtualKey("FUNC");
         EmitKeyEvent("FUNC");
         return;
     }
     if (event_code == KEY_EVENT_SAVE)
     {
+        ApplyVirtualKey("SAVE");
         EmitKeyEvent("SAVE");
         return;
     }
     if (event_code == KEY_EVENT_DISP)
     {
+        ApplyVirtualKey("DISP");
         EmitKeyEvent("DISP");
         return;
     }
     if (event_code == KEY_EVENT_SPEED)
     {
+        ApplyVirtualKey("SPEED");
         EmitKeyEvent("SPEED");
         return;
     }
     if (event_code == KEY_EVENT_FORMAT)
     {
+        ApplyVirtualKey("FORMAT");
         EmitKeyEvent("FORMAT");
         return;
     }
     if (event_code == KEY_EVENT_EXT)
     {
+        ApplyVirtualKey("EXT");
         EmitKeyEvent("EXT");
         return;
     }
     if (event_code == KEY_EVENT_SHIFT)
     {
+        ApplyVirtualKey("SHIFT");
         EmitKeyEvent("SHIFT");
         return;
     }
     if (event_code == KEY_EVENT_ADD)
     {
+        ApplyVirtualKey("ADD");
         EmitKeyEvent("ADD");
     }
 }
@@ -1528,16 +1605,43 @@ static void UpdateDisplayBuffer(void)
 {
     char text[DISPLAY_DIGITS + 1];
 
+    g_display_dot_mask = 0;
+
     if (g_display_on == 0)
     {
         FillDisplayText("");
         return;
     }
 
-    if (g_boot_splash_ms != 0)
+    if (g_boot_phase != BOOT_PHASE_DONE)
     {
-        FillDisplayText("HELLO");
-        return;
+        switch (g_boot_phase)
+        {
+        case BOOT_PHASE_ALL_ON:
+            FillDisplayText("88888888");
+            g_display_dot_mask = 0xff;
+            return;
+        case BOOT_PHASE_ALL_OFF:
+            FillDisplayText("");
+            return;
+        case BOOT_PHASE_ID_ON:
+            FillDisplayText(BOOT_ID_TEXT);
+            return;
+        case BOOT_PHASE_ID_OFF:
+            FillDisplayText("");
+            return;
+        case BOOT_PHASE_NAME_ON:
+            FillDisplayText(BOOT_NAME_TEXT);
+            return;
+        case BOOT_PHASE_NAME_OFF:
+            FillDisplayText("");
+            return;
+        case BOOT_PHASE_VERSION:
+            FillDisplayText(BOOT_VERSION_TEXT);
+            return;
+        default:
+            break;
+        }
     }
 
     if ((g_display_page == 2) && (g_message[0] != '\0'))
@@ -1551,6 +1655,8 @@ static void UpdateDisplayBuffer(void)
         {
             int base;
             uint8_t index;
+            uint8_t text_index = 0;
+            uint8_t pending_next_dot = 0;
             memset(text, ' ', DISPLAY_DIGITS);
             text[DISPLAY_DIGITS] = '\0';
             if (g_format_left != 0)
@@ -1564,10 +1670,38 @@ static void UpdateDisplayBuffer(void)
             for (index = 0; index < DISPLAY_DIGITS; index++)
             {
                 int source = base + index;
-                if ((source >= 0) && (source < (int)length))
+                char c;
+                if ((source < 0) || (source >= (int)length))
                 {
-                    text[index] = g_message[source];
+                    continue;
                 }
+                c = g_message[source];
+                if (c == '.')
+                {
+                    if (g_format_left != 0)
+                    {
+                        if (text_index != 0)
+                        {
+                            g_display_dot_mask |= (uint8_t)(1u << (text_index - 1));
+                        }
+                    }
+                    else
+                    {
+                        pending_next_dot = 1;
+                    }
+                    continue;
+                }
+                if (text_index >= DISPLAY_DIGITS)
+                {
+                    break;
+                }
+                text[text_index] = c;
+                if (pending_next_dot != 0)
+                {
+                    g_display_dot_mask |= (uint8_t)(1u << text_index);
+                    pending_next_dot = 0;
+                }
+                text_index++;
             }
             memcpy(g_display_chars, text, DISPLAY_DIGITS + 1);
         }
@@ -1631,7 +1765,7 @@ static void ReverseText(char *text)
 
 static void BuildCompactDateText(char *text, size_t size)
 {
-    snprintf(text, size, "%02u.%02u.%02u", g_now.month, g_now.date, g_now.year % 100);
+    snprintf(text, size, "%02u.%02u.%02u", g_now.year % 100, g_now.month, g_now.date);
     if (g_format_left == 0)
     {
         ReverseText(text);
@@ -1683,6 +1817,10 @@ static void RefreshDisplayDigit(void)
 
     select_mask = (uint8_t)(1u << index);
     seg_value = EncodeDisplayChar(g_display_chars[index]);
+    if ((g_display_dot_mask & (uint8_t)(1u << index)) != 0)
+    {
+        seg_value |= 0x80;
+    }
     I2C0_WriteByte(TCA6424_I2CADDR, TCA6424_OUTPUT_PORT2, 0x00);
     I2C0_WriteByte(TCA6424_I2CADDR, TCA6424_OUTPUT_PORT1, 0x00);
     I2C0_WriteByte(TCA6424_I2CADDR, TCA6424_OUTPUT_PORT1, seg_value);
@@ -1754,7 +1892,6 @@ static void SampleBoardKeys(void)
         KEY_EVENT_FORMAT, KEY_EVENT_EXT, KEY_EVENT_SHIFT, KEY_EVENT_ADD
     };
     uint8_t port_value;
-    uint8_t active_mask;
     uint8_t key_mask;
     uint8_t index;
 
@@ -1794,21 +1931,18 @@ static void SampleBoardKeys(void)
         g_key_format_state = 0;
     }
 
-    port_value = I2C0_ReadByte(TCA6424_I2CADDR, TCA6424_INPUT_PORT0);
-    if (g_board_key_initialized == 0)
+    if (g_boot_phase != BOOT_PHASE_DONE)
     {
-        g_board_key_initialized = 1;
-        g_board_key_idle_mask = port_value;
         g_board_key_state_mask = 0;
         memset((void *)g_board_key_count, 0, sizeof(g_board_key_count));
         return;
     }
 
-    active_mask = (uint8_t)(port_value ^ g_board_key_idle_mask);
+    port_value = I2C0_ReadByte(TCA6424_I2CADDR, TCA6424_INPUT_PORT0);
     for (index = 0; index < 8; index++)
     {
         key_mask = (uint8_t)(1u << index);
-        if ((active_mask & key_mask) != 0)
+        if ((port_value & key_mask) == 0)
         {
             if (g_board_key_count[index] < KEY_DEBOUNCE_TICKS)
             {
@@ -2453,7 +2587,7 @@ void SysTick_Handler(void)
         g_boot_splash_ms--;
         if (g_boot_splash_ms == 0)
         {
-            g_display_dirty = 1;
+            AdvanceBootSequence();
         }
     }
 
