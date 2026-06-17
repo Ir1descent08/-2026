@@ -66,6 +66,7 @@
 #define PCA9557_I2CADDR             0x18
 
 #define TCA6424_INPUT_PORT0         0x00
+#define TCA6424_POLINVERT_PORT0     0x04
 #define PCA9557_INPUT               0x00
 #define PCA9557_OUTPUT              0x01
 #define PCA9557_POLINVERT           0x02
@@ -116,6 +117,7 @@ static void HandleSetAlarm(char *tokens[], uint8_t count);
 static void HandleGetDate(char *tokens[], uint8_t count);
 static void HandleGetTime(char *tokens[], uint8_t count);
 static void HandleGetAlarm(char *tokens[], uint8_t count);
+static void HandleGetKey(char *tokens[], uint8_t count);
 static void HandleSetDisplay(char *tokens[], uint8_t count);
 static void HandleSetFormat(char *tokens[], uint8_t count);
 static void HandleSetMode(char *tokens[], uint8_t count);
@@ -139,6 +141,7 @@ static uint8_t EncodeDisplayChar(char c);
 static void SampleBoardKeys(void);
 static void QueueKeyEvent(uint8_t event_code);
 static void EmitKeyEvent(const char *name);
+static void EmitBoardKeyRawEvent(uint8_t port_value);
 static void ApplyVirtualKey(const char *name);
 static bool MatchToken(const char *token, const char *pattern);
 static bool ParseUnsigned(const char *token, uint32_t *value);
@@ -186,6 +189,8 @@ static volatile uint8_t g_key_disp_count;
 static volatile uint8_t g_key_format_count;
 static volatile uint8_t g_board_key_armed;
 static volatile uint8_t g_board_key_release_count;
+static volatile uint8_t g_board_key_raw_valid;
+static volatile uint8_t g_board_key_raw_last;
 static volatile uint8_t g_board_key_state_mask;
 static volatile uint8_t g_board_key_count[8];
 static volatile uint8_t g_boot_phase;
@@ -324,6 +329,8 @@ static void ResetProtocolState(void)
     g_key_format_count = 0;
     g_board_key_armed = 0;
     g_board_key_release_count = 0;
+    g_board_key_raw_valid = 0;
+    g_board_key_raw_last = 0xff;
     g_board_key_state_mask = 0;
     g_boot_splash_ms = BOOT_ON_MS;
     g_scroll_elapsed_ms = 0;
@@ -534,6 +541,11 @@ static void HandleGetCommand(char *subcommand, char *cursor)
     if (MatchToken(subcommand, "ALARM"))
     {
         HandleGetAlarm(tokens, count);
+        return;
+    }
+    if (MatchToken(subcommand, "KEY"))
+    {
+        HandleGetKey(tokens, count);
         return;
     }
     if (MatchToken(subcommand, "DISPlay"))
@@ -1225,6 +1237,22 @@ static void HandleGetAlarm(char *tokens[], uint8_t count)
         offset += (uint8_t)snprintf(response + offset, sizeof(response) - offset, "%sSECOND %02u", (offset == 0) ? "" : " ", g_alarm_second);
     }
 
+    UARTReplyOK(response);
+}
+
+static void HandleGetKey(char *tokens[], uint8_t count)
+{
+    char response[48];
+    uint8_t port_value;
+
+    if (count != 0)
+    {
+        UARTReplyError("PARAM");
+        return;
+    }
+
+    port_value = I2C0_ReadByte(TCA6424_I2CADDR, TCA6424_INPUT_PORT0);
+    snprintf(response, sizeof(response), "RAW %02X ACT %02X ARM %u", port_value, (uint8_t)(~port_value), g_board_key_armed);
     UARTReplyOK(response);
 }
 
@@ -1945,12 +1973,20 @@ static void SampleBoardKeys(void)
     {
         g_board_key_armed = 0;
         g_board_key_release_count = 0;
+        g_board_key_raw_valid = 0;
         g_board_key_state_mask = 0;
         memset((void *)g_board_key_count, 0, sizeof(g_board_key_count));
         return;
     }
 
     port_value = I2C0_ReadByte(TCA6424_I2CADDR, TCA6424_INPUT_PORT0);
+    if ((g_board_key_raw_valid == 0) || (g_board_key_raw_last != port_value))
+    {
+        g_board_key_raw_valid = 1;
+        g_board_key_raw_last = port_value;
+        EmitBoardKeyRawEvent(port_value);
+    }
+
     if (g_board_key_armed == 0)
     {
         if (port_value == 0xff)
@@ -2009,6 +2045,14 @@ static void EmitKeyEvent(const char *name)
 {
     UARTStringPut("*EVT:KEY ");
     UARTStringPut(name);
+    UARTStringPut("\r\n");
+}
+
+static void EmitBoardKeyRawEvent(uint8_t port_value)
+{
+    char response[20];
+    snprintf(response, sizeof(response), "*EVT:KEYRAW %02X", port_value);
+    UARTStringPut(response);
     UARTStringPut("\r\n");
 }
 
@@ -2527,6 +2571,7 @@ void S800_I2C0_Init(void)
     I2CMasterEnable(I2C0_BASE);
 
     result = I2C0_WriteByte(TCA6424_I2CADDR, TCA6424_CONFIG_PORT0, 0xff);
+    result = I2C0_WriteByte(TCA6424_I2CADDR, TCA6424_POLINVERT_PORT0, 0x00);
     result = I2C0_WriteByte(TCA6424_I2CADDR, TCA6424_CONFIG_PORT1, 0x00);
     result = I2C0_WriteByte(TCA6424_I2CADDR, TCA6424_CONFIG_PORT2, 0x00);
     result = I2C0_WriteByte(PCA9557_I2CADDR, PCA9557_CONFIG, 0x00);
