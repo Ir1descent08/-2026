@@ -184,8 +184,6 @@ static volatile uint8_t g_key_disp_state;
 static volatile uint8_t g_key_format_state;
 static volatile uint8_t g_key_disp_count;
 static volatile uint8_t g_key_format_count;
-static volatile uint8_t g_board_key_initialized;
-static volatile uint8_t g_board_key_idle_mask;
 static volatile uint8_t g_board_key_state_mask;
 static volatile uint8_t g_board_key_count[8];
 static volatile uint8_t g_boot_phase;
@@ -322,8 +320,6 @@ static void ResetProtocolState(void)
     g_key_format_state = 0;
     g_key_disp_count = 0;
     g_key_format_count = 0;
-    g_board_key_initialized = 0;
-    g_board_key_idle_mask = 0;
     g_board_key_state_mask = 0;
     g_boot_splash_ms = BOOT_ON_MS;
     g_scroll_elapsed_ms = 0;
@@ -1943,23 +1939,13 @@ static void SampleBoardKeys(void)
 
     if (g_boot_phase != BOOT_PHASE_DONE)
     {
-        g_board_key_initialized = 0;
         g_board_key_state_mask = 0;
         memset((void *)g_board_key_count, 0, sizeof(g_board_key_count));
         return;
     }
 
     port_value = I2C0_ReadByte(TCA6424_I2CADDR, TCA6424_INPUT_PORT0);
-    if (g_board_key_initialized == 0)
-    {
-        g_board_key_initialized = 1;
-        g_board_key_idle_mask = port_value;
-        g_board_key_state_mask = 0;
-        memset((void *)g_board_key_count, 0, sizeof(g_board_key_count));
-        return;
-    }
-
-    active_mask = (uint8_t)(port_value ^ g_board_key_idle_mask);
+    active_mask = (uint8_t)(~port_value);
     for (index = 0; index < 8; index++)
     {
         key_mask = (uint8_t)(1u << index);
