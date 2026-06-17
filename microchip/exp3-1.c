@@ -28,8 +28,9 @@
 #define SCROLL_SLOW_MS              600
 #define SCROLL_MEDIUM_MS            300
 #define SCROLL_FAST_MS              150
-#define BOOT_BLINK_MS               300
-#define BOOT_VERSION_MS             1000
+#define BOOT_ON_MS                  1500
+#define BOOT_OFF_MS                 1000
+#define BOOT_VERSION_MS             2000
 #define BOOT_PHASE_DONE             0
 #define BOOT_PHASE_ALL_ON           1
 #define BOOT_PHASE_ALL_OFF          2
@@ -283,7 +284,7 @@ static void ResetClockState(void)
     g_format_left = 1;
     g_display_page = 0;
     g_boot_phase = BOOT_PHASE_ALL_ON;
-    g_boot_splash_ms = BOOT_BLINK_MS;
+    g_boot_splash_ms = BOOT_ON_MS;
     g_led_value = 0xff;
     g_beep_remaining_ms = 0;
     g_display_dirty = 1;
@@ -322,7 +323,7 @@ static void ResetProtocolState(void)
     g_key_format_count = 0;
     g_board_key_initialized = 0;
     g_board_key_state_mask = 0;
-    g_boot_splash_ms = BOOT_BLINK_MS;
+    g_boot_splash_ms = BOOT_ON_MS;
     g_scroll_elapsed_ms = 0;
     g_scroll_offset = 0;
     g_beep_output_state = 0;
@@ -1451,27 +1452,27 @@ static void AdvanceBootSequence(void)
     {
     case BOOT_PHASE_ALL_ON:
         g_boot_phase = BOOT_PHASE_ALL_OFF;
-        g_boot_splash_ms = BOOT_BLINK_MS;
+        g_boot_splash_ms = BOOT_OFF_MS;
         g_led_value = 0x00;
         break;
     case BOOT_PHASE_ALL_OFF:
         g_boot_phase = BOOT_PHASE_ID_ON;
-        g_boot_splash_ms = BOOT_BLINK_MS;
+        g_boot_splash_ms = BOOT_ON_MS;
         g_led_value = 0xff;
         break;
     case BOOT_PHASE_ID_ON:
         g_boot_phase = BOOT_PHASE_ID_OFF;
-        g_boot_splash_ms = BOOT_BLINK_MS;
+        g_boot_splash_ms = BOOT_OFF_MS;
         g_led_value = 0x00;
         break;
     case BOOT_PHASE_ID_OFF:
         g_boot_phase = BOOT_PHASE_NAME_ON;
-        g_boot_splash_ms = BOOT_BLINK_MS;
+        g_boot_splash_ms = BOOT_ON_MS;
         g_led_value = 0xff;
         break;
     case BOOT_PHASE_NAME_ON:
         g_boot_phase = BOOT_PHASE_NAME_OFF;
-        g_boot_splash_ms = BOOT_BLINK_MS;
+        g_boot_splash_ms = BOOT_OFF_MS;
         g_led_value = 0x00;
         break;
     case BOOT_PHASE_NAME_OFF:
