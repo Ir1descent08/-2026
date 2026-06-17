@@ -67,7 +67,8 @@
 #define PCA9557_I2CADDR             0x18
 
 #define TCA6424_INPUT_PORT0         0x00
-#define TCA6424_POLINVERT_PORT0     0x04
+#define TCA6424_OUTPUT_PORT0        0x04
+#define TCA6424_POLINVERT_PORT0     0x08
 #define PCA9557_INPUT               0x00
 #define PCA9557_OUTPUT              0x01
 #define PCA9557_POLINVERT           0x02
@@ -1243,8 +1244,11 @@ static void HandleGetAlarm(char *tokens[], uint8_t count)
 
 static void HandleGetKey(char *tokens[], uint8_t count)
 {
-    char response[48];
-    uint8_t port_value;
+    char response[64];
+    uint8_t input_value;
+    uint8_t output_value;
+    uint8_t polarity_value;
+    uint8_t config_value;
 
     if (count != 0)
     {
@@ -1252,8 +1256,11 @@ static void HandleGetKey(char *tokens[], uint8_t count)
         return;
     }
 
-    port_value = I2C0_ReadByte(TCA6424_I2CADDR, TCA6424_INPUT_PORT0);
-    snprintf(response, sizeof(response), "RAW %02X ACT %02X ARM %u", port_value, (uint8_t)(~port_value), g_board_key_armed);
+    input_value = I2C0_ReadByte(TCA6424_I2CADDR, TCA6424_INPUT_PORT0);
+    output_value = I2C0_ReadByte(TCA6424_I2CADDR, TCA6424_OUTPUT_PORT0);
+    polarity_value = I2C0_ReadByte(TCA6424_I2CADDR, TCA6424_POLINVERT_PORT0);
+    config_value = I2C0_ReadByte(TCA6424_I2CADDR, TCA6424_CONFIG_PORT0);
+    snprintf(response, sizeof(response), "IN %02X OUT %02X POL %02X CFG %02X ARM %u", input_value, output_value, polarity_value, config_value, g_board_key_armed);
     UARTReplyOK(response);
 }
 
