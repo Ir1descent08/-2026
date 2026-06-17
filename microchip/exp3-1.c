@@ -42,6 +42,7 @@
 #define BOOT_ID_TEXT                "31910429"
 #define BOOT_NAME_TEXT              "FANSIZHE"
 #define BOOT_VERSION_TEXT           "0.0.1"
+#define SW_DEBUG_DISABLE_DISPLAY_AFTER_BOOT 1
 #define BEEP_PWM_PERIOD             8000
 #define DEFAULT_YEAR                2026
 #define DEFAULT_MONTH               1
@@ -1528,6 +1529,14 @@ static void AdvanceBootSequence(void)
 
 static void ProcessDisplayTask(void)
 {
+    if ((SW_DEBUG_DISABLE_DISPLAY_AFTER_BOOT != 0) && (g_boot_phase == BOOT_PHASE_DONE))
+    {
+        I2C0_WriteByte(TCA6424_I2CADDR, TCA6424_OUTPUT_PORT1, 0x00);
+        I2C0_WriteByte(TCA6424_I2CADDR, TCA6424_OUTPUT_PORT2, 0x00);
+        g_display_refresh_pending = 0;
+        return;
+    }
+
     if ((g_display_on != 0) && (g_display_page == 2) && (strlen(g_message) > DISPLAY_DIGITS) &&
         (g_scroll_elapsed_ms >= g_scroll_speed_ms))
     {
