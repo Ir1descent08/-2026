@@ -39,7 +39,7 @@
 #define BOOT_PHASE_NAME_ON          5
 #define BOOT_PHASE_NAME_OFF         6
 #define BOOT_PHASE_VERSION          7
-#define BOOT_ID_TEXT                "12345678"
+#define BOOT_ID_TEXT                "31910429"
 #define BOOT_NAME_TEXT              "FANSIZHE"
 #define BOOT_VERSION_TEXT           "0.0.1"
 #define BEEP_PWM_PERIOD             8000
@@ -1869,8 +1869,12 @@ static uint8_t EncodeDisplayChar(char c)
         return 0x3f;
     case 'P':
         return 0x73;
+    case 'I':
+        return 0x30;
     case 'R':
         return 0x50;
+    case 'S':
+        return 0x6d;
     case 'T':
         return 0x78;
     case 'U':
@@ -1879,6 +1883,8 @@ static uint8_t EncodeDisplayChar(char c)
         return 0x3e;
     case 'Y':
         return 0x6e;
+    case 'Z':
+        return 0x5b;
     case '-':
         return 0x40;
     case '.':
