@@ -1,0 +1,68 @@
+<h2>方案 A：主界面布局草图</h2>
+<p class="subtitle">都保持单窗口多分区，但区域摆放略有不同。请选一个更适合老师验收演示的版本。</p>
+
+<div class="cards">
+  <div class="card" data-choice="a1" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">A1｜控制左 / 镜像中 / 日志右</div>
+        <div class="mockup-body">
+          <div class="mock-nav">状态栏：串口｜连接状态｜FORMAT｜MODE｜ALARM｜心跳延迟</div>
+          <div style="display:flex; gap:12px; margin-top:12px; min-height:320px;">
+            <div class="mock-sidebar" style="width:28%;">串口管理<br><br>基础控制<br>时间 / 日期 / 闹钟<br><br>显示控制<br>FORMAT / DISP / MSG<br><br>外设控制<br>LED / BEEP / KEY</div>
+            <div class="mock-content" style="width:40%;">数字孪生镜像<br><br>8位7SEG + 小数点<br>8位LED<br>8位按键 + USER1/USER2<br><br>镜像状态提示<br>DAY / NIGHT / 心跳</div>
+            <div class="mock-sidebar" style="width:32%;">收发日志<br><br>发送 / 应答 / 事件 / 错误<br><br>导出日志<br><br>底部可附一小块原始命令输入</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A1 推荐</h3>
+      <p>演示时视线最自然：左边操作，中间看效果，右边看日志。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="a2" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">A2｜控制左 / 镜像右 / 日志下</div>
+        <div class="mockup-body">
+          <div class="mock-nav">状态栏：串口｜连接状态｜FORMAT｜MODE｜ALARM｜心跳延迟</div>
+          <div style="display:flex; gap:12px; margin-top:12px; min-height:220px;">
+            <div class="mock-sidebar" style="width:35%;">串口 + 全部控制面板</div>
+            <div class="mock-content" style="width:65%;">数字孪生镜像 + 扩展功能快捷区</div>
+          </div>
+          <div class="placeholder" style="margin-top:12px; min-height:100px;">底部整行：收发日志 + 原始命令区</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A2</h3>
+      <p>镜像区更大，适合突出数字孪生，但日志需要低头看。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="a3" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">A3｜上方控制 / 下方镜像+日志</div>
+        <div class="mockup-body">
+          <div class="mock-nav">状态栏：串口｜连接状态｜FORMAT｜MODE｜ALARM｜心跳延迟</div>
+          <div class="placeholder" style="margin-top:12px; min-height:110px;">顶部整行：串口管理 + 时间/日期/闹钟 + 显示 + 外设 + 扩展按钮</div>
+          <div style="display:flex; gap:12px; margin-top:12px; min-height:210px;">
+            <div class="mock-content" style="width:55%;">数字孪生镜像</div>
+            <div class="mock-sidebar" style="width:45%;">日志 / 事件 / 原始命令</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A3</h3>
+      <p>更像仪表盘，但控制区容易显得拥挤。</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <p class="subtitle">建议优先看 A1。如果你觉得某个区域该更大，也直接在终端告诉我，我再改下一版。</p>
+</div>
