@@ -143,7 +143,6 @@ static uint8_t EncodeDisplayChar(char c);
 static void SampleBoardKeys(void);
 static void QueueKeyEvent(uint8_t event_code);
 static void EmitKeyEvent(const char *name);
-static void EmitBoardKeyRawEvent(uint8_t port_value);
 static void ApplyVirtualKey(const char *name);
 static bool MatchToken(const char *token, const char *pattern);
 static bool ParseUnsigned(const char *token, uint32_t *value);
@@ -189,12 +188,10 @@ static volatile uint8_t g_key_disp_state;
 static volatile uint8_t g_key_format_state;
 static volatile uint8_t g_key_disp_count;
 static volatile uint8_t g_key_format_count;
-static volatile uint8_t g_board_key_armed;
-static volatile uint8_t g_board_key_release_count;
-static volatile uint8_t g_board_key_raw_valid;
-static volatile uint8_t g_board_key_raw_last;
+static volatile uint8_t g_board_key_raw_value;
+static volatile uint8_t g_board_key_stable_value;
+static volatile uint8_t g_board_key_debounce_count;
 static volatile uint8_t g_board_key_state_mask;
-static volatile uint8_t g_board_key_count[8];
 static volatile uint8_t g_boot_phase;
 static volatile uint16_t g_boot_splash_ms;
 static volatile uint16_t g_scroll_speed_ms;
@@ -309,7 +306,6 @@ static void ResetProtocolState(void)
     memset(g_message, 0, sizeof(g_message));
     memset(g_last_key, 0, sizeof(g_last_key));
     memset(g_display_chars, ' ', DISPLAY_DIGITS);
-    memset((void *)g_board_key_count, 0, sizeof(g_board_key_count));
     g_display_chars[DISPLAY_DIGITS] = '\0';
     g_display_dot_mask = 0;
     g_uptime_s = 0;
@@ -329,10 +325,9 @@ static void ResetProtocolState(void)
     g_key_format_state = 0;
     g_key_disp_count = 0;
     g_key_format_count = 0;
-    g_board_key_armed = 0;
-    g_board_key_release_count = 0;
-    g_board_key_raw_valid = 0;
-    g_board_key_raw_last = 0xff;
+    g_board_key_raw_value = 0xff;
+    g_board_key_stable_value = 0xff;
+    g_board_key_debounce_count = 0;
     g_board_key_state_mask = 0;
     g_boot_splash_ms = BOOT_ON_MS;
     g_scroll_elapsed_ms = 0;
@@ -1244,11 +1239,9 @@ static void HandleGetAlarm(char *tokens[], uint8_t count)
 
 static void HandleGetKey(char *tokens[], uint8_t count)
 {
-    char response[64];
-    uint8_t input_value;
-    uint8_t output_value;
-    uint8_t polarity_value;
-    uint8_t config_value;
+    char response[48];
+    uint8_t key_value;
+    uint8_t temp;
 
     if (count != 0)
     {
@@ -1256,11 +1249,14 @@ static void HandleGetKey(char *tokens[], uint8_t count)
         return;
     }
 
-    input_value = I2C0_ReadByte(TCA6424_I2CADDR, TCA6424_INPUT_PORT0);
-    output_value = I2C0_ReadByte(TCA6424_I2CADDR, TCA6424_OUTPUT_PORT0);
-    polarity_value = I2C0_ReadByte(TCA6424_I2CADDR, TCA6424_POLINVERT_PORT0);
-    config_value = I2C0_ReadByte(TCA6424_I2CADDR, TCA6424_CONFIG_PORT0);
-    snprintf(response, sizeof(response), "IN %02X OUT %02X POL %02X CFG %02X ARM %u", input_value, output_value, polarity_value, config_value, g_board_key_armed);
+    key_value = I2C0_ReadByte(TCA6424_I2CADDR, TCA6424_INPUT_PORT0);
+    temp = I2C0_ReadByte(TCA6424_I2CADDR, TCA6424_INPUT_PORT0);
+    if (key_value != temp)
+    {
+        key_value = temp;
+    }
+
+    snprintf(response, sizeof(response), "RAW %02X STB %02X ACT %02X", key_value, g_board_key_stable_value, (uint8_t)(~g_board_key_stable_value));
     UARTReplyOK(response);
 }
 
@@ -1944,7 +1940,9 @@ static void SampleBoardKeys(void)
         KEY_EVENT_FUNC, KEY_EVENT_SAVE, KEY_EVENT_DISP, KEY_EVENT_SPEED,
         KEY_EVENT_FORMAT, KEY_EVENT_EXT, KEY_EVENT_SHIFT, KEY_EVENT_ADD
     };
-    uint8_t port_value;
+    uint8_t key_value;
+    uint8_t temp;
+    uint8_t old_active_mask;
     uint8_t active_mask;
     uint8_t key_mask;
     uint8_t index;
@@ -1987,65 +1985,45 @@ static void SampleBoardKeys(void)
 
     if (g_boot_phase != BOOT_PHASE_DONE)
     {
-        g_board_key_armed = 0;
-        g_board_key_release_count = 0;
-        g_board_key_raw_valid = 0;
+        g_board_key_raw_value = 0xff;
+        g_board_key_stable_value = 0xff;
+        g_board_key_debounce_count = 0;
         g_board_key_state_mask = 0;
-        memset((void *)g_board_key_count, 0, sizeof(g_board_key_count));
         return;
     }
 
-    port_value = I2C0_ReadByte(TCA6424_I2CADDR, TCA6424_INPUT_PORT0);
-    if ((g_board_key_raw_valid == 0) || (g_board_key_raw_last != port_value))
+    key_value = I2C0_ReadByte(TCA6424_I2CADDR, TCA6424_INPUT_PORT0);
+    temp = I2C0_ReadByte(TCA6424_I2CADDR, TCA6424_INPUT_PORT0);
+    if (key_value != temp)
     {
-        g_board_key_raw_valid = 1;
-        g_board_key_raw_last = port_value;
-        EmitBoardKeyRawEvent(port_value);
+        key_value = temp;
     }
+    g_board_key_raw_value = key_value;
 
-    if (g_board_key_armed == 0)
+    if (key_value != g_board_key_stable_value)
     {
-        if (port_value == 0xff)
+        g_board_key_debounce_count++;
+        if (g_board_key_debounce_count >= 2)
         {
-            if (g_board_key_release_count < KEY_DEBOUNCE_TICKS)
+            old_active_mask = g_board_key_state_mask;
+            g_board_key_stable_value = key_value;
+            g_board_key_debounce_count = 0;
+            active_mask = (uint8_t)(~g_board_key_stable_value);
+            g_board_key_state_mask = active_mask;
+            for (index = 0; index < 8; index++)
             {
-                g_board_key_release_count++;
-            }
-            else
-            {
-                g_board_key_armed = 1;
+                key_mask = (uint8_t)(1u << index);
+                if (((active_mask & key_mask) != 0) && ((old_active_mask & key_mask) == 0))
+                {
+                    QueueKeyEvent(event_map[index]);
+                    break;
+                }
             }
         }
-        else
-        {
-            g_board_key_release_count = 0;
-        }
-        g_board_key_state_mask = 0;
-        memset((void *)g_board_key_count, 0, sizeof(g_board_key_count));
-        return;
     }
-
-    active_mask = (uint8_t)(~port_value);
-    for (index = 0; index < 8; index++)
+    else
     {
-        key_mask = (uint8_t)(1u << index);
-        if ((active_mask & key_mask) != 0)
-        {
-            if (g_board_key_count[index] < KEY_DEBOUNCE_TICKS)
-            {
-                g_board_key_count[index]++;
-            }
-            else if ((g_board_key_state_mask & key_mask) == 0)
-            {
-                g_board_key_state_mask |= key_mask;
-                QueueKeyEvent(event_map[index]);
-            }
-        }
-        else
-        {
-            g_board_key_count[index] = 0;
-            g_board_key_state_mask &= (uint8_t)(~key_mask);
-        }
+        g_board_key_debounce_count = 0;
     }
 }
 
@@ -2061,14 +2039,6 @@ static void EmitKeyEvent(const char *name)
 {
     UARTStringPut("*EVT:KEY ");
     UARTStringPut(name);
-    UARTStringPut("\r\n");
-}
-
-static void EmitBoardKeyRawEvent(uint8_t port_value)
-{
-    char response[20];
-    snprintf(response, sizeof(response), "*EVT:KEYRAW %02X", port_value);
-    UARTStringPut(response);
     UARTStringPut("\r\n");
 }
 
