@@ -1239,9 +1239,10 @@ static void HandleGetAlarm(char *tokens[], uint8_t count)
 
 static void HandleGetKey(char *tokens[], uint8_t count)
 {
-    char response[48];
-    uint8_t key_value;
-    uint8_t temp;
+    char response[64];
+    uint8_t input_value;
+    uint8_t polarity_value;
+    uint8_t config_value;
 
     if (count != 0)
     {
@@ -1249,14 +1250,10 @@ static void HandleGetKey(char *tokens[], uint8_t count)
         return;
     }
 
-    key_value = I2C0_ReadByte(TCA6424_I2CADDR, TCA6424_INPUT_PORT0);
-    temp = I2C0_ReadByte(TCA6424_I2CADDR, TCA6424_INPUT_PORT0);
-    if (key_value != temp)
-    {
-        key_value = temp;
-    }
-
-    snprintf(response, sizeof(response), "RAW %02X STB %02X ACT %02X", key_value, g_board_key_stable_value, (uint8_t)(~g_board_key_stable_value));
+    input_value = I2C0_ReadByte(TCA6424_I2CADDR, TCA6424_INPUT_PORT0);
+    polarity_value = I2C0_ReadByte(TCA6424_I2CADDR, TCA6424_POLINVERT_PORT0);
+    config_value = I2C0_ReadByte(TCA6424_I2CADDR, TCA6424_CONFIG_PORT0);
+    snprintf(response, sizeof(response), "IN %02X POL %02X CFG %02X STB %02X", input_value, polarity_value, config_value, g_board_key_stable_value);
     UARTReplyOK(response);
 }
 
