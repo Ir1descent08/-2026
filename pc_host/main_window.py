@@ -151,11 +151,18 @@ class MainWindow(QMainWindow):
         self.run_auto_mode(observer, when, "Asia/Shanghai")
 
     def run_weather_fetch(self, location: str = "Shanghai") -> None:
-        temp_c, condition = fetch_weather(requests.Session(), location)
+        try:
+            temp_c, condition = fetch_weather(requests.Session(), location)
+        except Exception as exc:
+            self.log_panel.append_entry("error", f"weather fetch failed: {exc}")
+            return
         append_history_row(str(self.history_csv), "weather", f"{temp_c}:{condition}")
         self.log_panel.append_entry("reply", f"weather {temp_c}C {condition}")
 
     def export_history_chart(self):
+        if not self.history_csv.exists():
+            self.log_panel.append_entry("error", "no history CSV to export")
+            return
         figure = build_history_figure(str(self.history_csv))
         figure.savefig("pc_host_history.png")
         self.log_panel.append_entry("reply", "saved pc_host_history.png")
