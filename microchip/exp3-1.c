@@ -42,7 +42,7 @@
 #define BOOT_ID_TEXT                "31910429"
 #define BOOT_NAME_TEXT              "FANSIZHE"
 #define BOOT_VERSION_TEXT           "0.0.1"
-#define SW_DEBUG_DISABLE_DISPLAY_AFTER_BOOT 1
+#define SW_DEBUG_DISABLE_DISPLAY_AFTER_BOOT 0
 #define BEEP_PWM_PERIOD             8000
 #define DEFAULT_YEAR                2026
 #define DEFAULT_MONTH               1
@@ -1240,6 +1240,8 @@ static void HandleGetAlarm(char *tokens[], uint8_t count)
 static void HandleGetKey(char *tokens[], uint8_t count)
 {
     char response[48];
+    uint8_t key_value;
+    uint8_t temp;
 
     if (count != 0)
     {
@@ -1247,7 +1249,14 @@ static void HandleGetKey(char *tokens[], uint8_t count)
         return;
     }
 
-    snprintf(response, sizeof(response), "RAW %02X STB %02X ACT %02X", g_board_key_raw_value, g_board_key_stable_value, (uint8_t)(~g_board_key_stable_value));
+    key_value = I2C0_ReadByte(TCA6424_I2CADDR, TCA6424_INPUT_PORT0);
+    temp = I2C0_ReadByte(TCA6424_I2CADDR, TCA6424_INPUT_PORT0);
+    if (key_value != temp)
+    {
+        key_value = temp;
+    }
+
+    snprintf(response, sizeof(response), "RAW %02X STB %02X ACT %02X", key_value, g_board_key_stable_value, (uint8_t)(~g_board_key_stable_value));
     UARTReplyOK(response);
 }
 
@@ -2591,13 +2600,13 @@ uint8_t I2C0_ReadByte(uint8_t DevAddr, uint8_t RegAddr)
     I2CMasterSlaveAddrSet(I2C0_BASE, DevAddr, false);
     I2CMasterDataPut(I2C0_BASE, RegAddr);
     I2CMasterControl(I2C0_BASE, I2C_MASTER_CMD_SINGLE_SEND);
-    while (I2CMasterBusBusy(I2C0_BASE))
+    while (I2CMasterBusy(I2C0_BASE))
     {
     }
     Delay(1);
     I2CMasterSlaveAddrSet(I2C0_BASE, DevAddr, true);
     I2CMasterControl(I2C0_BASE, I2C_MASTER_CMD_SINGLE_RECEIVE);
-    while (I2CMasterBusBusy(I2C0_BASE))
+    while (I2CMasterBusy(I2C0_BASE))
     {
     }
     value = I2CMasterDataGet(I2C0_BASE);
