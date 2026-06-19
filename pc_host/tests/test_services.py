@@ -1,0 +1,32 @@
+import unittest
+from datetime import datetime, timezone
+from astral import Observer
+from pc_host.services.daynight_service import compute_mode
+from pc_host.services.ntp_service import build_sync_requests, fetch_ntp_datetime
+
+
+class FakeNtpResponse:
+    tx_time = 1718700000
+
+
+class FakeNtpClient:
+    def request(self, host, version=3):
+        return FakeNtpResponse()
+
+
+class ServiceTests(unittest.TestCase):
+    def test_fetch_ntp_datetime_uses_client_response(self):
+        moment = fetch_ntp_datetime(FakeNtpClient())
+        self.assertEqual(moment.tzinfo, timezone.utc)
+        self.assertEqual(moment.year, 2024)
+
+    def test_build_sync_requests_returns_date_then_time(self):
+        requests = build_sync_requests(datetime(2026, 6, 18, 12, 34, 56, tzinfo=timezone.utc))
+        self.assertEqual(requests[0].text, "*SET:DATE YEAR MONTH DATE 2026 06 18")
+        self.assertEqual(requests[1].text, "*SET:TIME HOUR MINUTE SECOND 12 34 56")
+
+    def test_compute_mode_returns_day_when_between_sunrise_and_sunset(self):
+        observer = Observer(latitude=31.2304, longitude=121.4737)
+        # 04:00 UTC = 12:00 noon Shanghai time (clearly daytime)
+        mode = compute_mode(observer, datetime(2026, 6, 18, 4, 0, 0, tzinfo=timezone.utc), "Asia/Shanghai")
+        self.assertEqual(mode, "DAY")

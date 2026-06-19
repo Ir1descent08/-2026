@@ -8,6 +8,8 @@ from pc_host.commands import CommandRequest, query_name_for
 from pc_host.device_state import DeviceState
 from pc_host.protocol import parse_line
 from pc_host.serial_manager import SerialManager
+from pc_host.services.daynight_service import compute_mode
+from pc_host.services.ntp_service import build_sync_requests, fetch_ntp_datetime
 from pc_host.widgets.control_panel import ControlPanel
 from pc_host.widgets.log_panel import LogPanel
 from pc_host.widgets.status_bar import StatusBarWidget
@@ -35,6 +37,7 @@ class MainWindow(QMainWindow):
         self.control_panel.connect_requested.connect(self.connect_selected_port)
         self.control_panel.disconnect_requested.connect(self.disconnect_serial)
         self.control_panel.refresh_requested.connect(self.refresh_ports)
+        self.control_panel.ntp_requested.connect(self.run_ntp_sync)
 
         top_row = QHBoxLayout()
         top_row.addWidget(self.control_panel, 3)
@@ -121,3 +124,12 @@ class MainWindow(QMainWindow):
         self.control_panel.set_ready_enabled(self.state.ready)
         self.status_bar.update_state(self.state)
         self.twin_panel.update_state(self.state)
+
+    def run_ntp_sync(self) -> None:
+        moment = fetch_ntp_datetime()
+        for request in build_sync_requests(moment):
+            self.handle_command_request(request)
+
+    def run_auto_mode(self, observer, when, timezone_name: str) -> None:
+        mode = compute_mode(observer, when, timezone_name)
+        self.handle_command_request(CommandRequest(f"*SET:MODE {mode}"))
