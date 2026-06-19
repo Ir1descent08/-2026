@@ -134,3 +134,27 @@ class ControlPanel(QWidget):
 
     def selected_port(self) -> str:
         return self.port_combo.currentText()
+
+    def set_connected(self, connected: bool) -> None:
+        self.connect_button.setEnabled(not connected)
+        self.disconnect_button.setEnabled(connected)
+
+    def set_ready_enabled(self, ready: bool) -> None:
+        for button in (
+            self.display_on_button,
+            self.display_off_button,
+            self.format_left_button,
+            self.format_right_button,
+            self.msg_send_button,
+            self.set_date_button,
+            self.set_time_button,
+            self.set_alarm_button,
+            self.off_alarm_button,
+            self.set_led_button,
+            self.set_beep_button,
+            self.reset_button,
+            self.demo_send_button,
+        ):
+            button.setEnabled(ready)
+        for button in self.key_buttons.values():
+            button.setEnabled(ready)
