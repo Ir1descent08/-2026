@@ -5,6 +5,7 @@ from pc_host.device_state import DeviceState
 from pc_host.widgets.control_panel import ControlPanel
 from pc_host.widgets.log_panel import LogPanel
 from pc_host.widgets.status_bar import StatusBarWidget
+from pc_host.widgets.twin_panel import TwinPanel
 
 
 class ControlPanelTests(unittest.TestCase):
@@ -51,6 +52,17 @@ class WidgetTests(unittest.TestCase):
             panel.export_to_file(handle.name)
             handle.seek(0)
             self.assertIn("*PING", handle.read())
+
+
+class TwinPanelTests(unittest.TestCase):
+    def test_twin_panel_renders_digits_leds_and_last_key(self):
+        app = QApplication.instance() or QApplication([])
+        state = DeviceState(seg_text="12345678", seg_dp_hex="04", led_hex="AA", mode_value="DAY", last_key_event="USER1")
+        panel = TwinPanel()
+        panel.update_state(state)
+        self.assertEqual(panel.digit_labels[0].text(), "1")
+        self.assertEqual(panel.mode_value.text(), "DAY")
+        self.assertEqual(panel.key_labels["USER1"].text(), "USER1 *")
 
 
 if __name__ == "__main__":

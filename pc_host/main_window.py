@@ -2,7 +2,7 @@
 import time
 from typing import Callable, Optional
 from PyQt5.QtCore import QTimer
-from PyQt5.QtWidgets import QGroupBox, QHBoxLayout, QMainWindow, QVBoxLayout, QWidget
+from PyQt5.QtWidgets import QHBoxLayout, QMainWindow, QVBoxLayout, QWidget
 from pc_host.command_scheduler import CommandScheduler
 from pc_host.commands import CommandRequest, query_name_for
 from pc_host.device_state import DeviceState
@@ -11,6 +11,7 @@ from pc_host.serial_manager import SerialManager
 from pc_host.widgets.control_panel import ControlPanel
 from pc_host.widgets.log_panel import LogPanel
 from pc_host.widgets.status_bar import StatusBarWidget
+from pc_host.widgets.twin_panel import TwinPanel
 
 
 class MainWindow(QMainWindow):
@@ -27,9 +28,7 @@ class MainWindow(QMainWindow):
         outer = QVBoxLayout(root)
         self.status_bar = StatusBarWidget()
         self.control_panel = ControlPanel()
-        self.twin_placeholder = QGroupBox("右侧数字孪生")
-        twin_layout = QVBoxLayout(self.twin_placeholder)
-        twin_layout.addWidget(QWidget())
+        self.twin_panel = TwinPanel()
         self.log_panel = LogPanel()
 
         self.control_panel.command_requested.connect(self.handle_command_request)
@@ -39,7 +38,7 @@ class MainWindow(QMainWindow):
 
         top_row = QHBoxLayout()
         top_row.addWidget(self.control_panel, 3)
-        top_row.addWidget(self.twin_placeholder, 5)
+        top_row.addWidget(self.twin_panel, 5)
         outer.addWidget(self.status_bar)
         outer.addLayout(top_row)
         outer.addWidget(self.log_panel, 2)
@@ -121,3 +120,4 @@ class MainWindow(QMainWindow):
         self.control_panel.set_connected(self.state.connected)
         self.control_panel.set_ready_enabled(self.state.ready)
         self.status_bar.update_state(self.state)
+        self.twin_panel.update_state(self.state)
