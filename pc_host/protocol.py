@@ -14,7 +14,12 @@ class ParsedMessage:
 def parse_line(line: str) -> ParsedMessage:
     text = line.strip()
     if text.startswith("*PONG "):
-        return ParsedMessage(kind="pong", raw=text, uptime_s=int(text.split()[1]))
+        parts = text.split()
+        try:
+            uptime = int(parts[1]) if len(parts) > 1 else 0
+        except ValueError:
+            uptime = 0
+        return ParsedMessage(kind="pong", raw=text, uptime_s=uptime)
     if text.startswith("ERROR"):
         return ParsedMessage(kind="error", raw=text, payload=text[6:].strip())
     if text.startswith("OK"):

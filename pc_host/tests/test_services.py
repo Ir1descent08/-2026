@@ -65,3 +65,14 @@ class WeatherAndChartTests(unittest.TestCase):
             append_history_row(handle.name, "mode", "DAY")
             figure = build_history_figure(handle.name)
             self.assertEqual(len(figure.axes), 1)
+
+    def test_chart_service_skips_malformed_rows(self):
+        with tempfile.NamedTemporaryFile("w+", delete=False, suffix=".csv") as handle:
+            handle.write("2026-06-18T12:00:00,ntp_sync,OK\n")
+            handle.write("malformed_row_with_only_one_column\n")
+            handle.write("2026-06-18T12:01:00,mode,DAY\n")
+            handle.write("too,many,columns,here,extra\n")
+            handle.write("\n")
+            handle.flush()
+            figure = build_history_figure(handle.name)
+            self.assertEqual(len(figure.axes), 1)

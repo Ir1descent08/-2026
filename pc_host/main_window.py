@@ -38,7 +38,7 @@ class MainWindow(QMainWindow):
         self.twin_panel = TwinPanel()
         self.log_panel = LogPanel()
 
-        self.history_csv = Path("pc_host_history.csv")
+        self.history_csv = Path(__file__).parent / "pc_host_history.csv"
 
         self.control_panel.command_requested.connect(self.handle_command_request)
         self.control_panel.connect_requested.connect(self.connect_selected_port)

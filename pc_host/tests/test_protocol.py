@@ -10,6 +10,17 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(message.kind, "pong")
         self.assertEqual(message.uptime_s, 42)
 
+    def test_parse_pong_malformed_non_numeric(self):
+        message = parse_line("*PONG garbage")
+        self.assertEqual(message.kind, "pong")
+        self.assertEqual(message.uptime_s, 0)
+
+    def test_parse_pong_malformed_with_extra_text(self):
+        # Uptime token is not numeric (e.g., corrupted data)
+        message = parse_line("*PONG 12abc")
+        self.assertEqual(message.kind, "pong")
+        self.assertEqual(message.uptime_s, 0)
+
     def test_parse_key_event(self):
         message = parse_line("*EVT:KEY USER1")
         self.assertEqual(message.kind, "event")
