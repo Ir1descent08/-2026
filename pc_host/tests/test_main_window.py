@@ -33,6 +33,20 @@ class FakeSerialManager(SerialManager):
 
 
 class MainWindowFlowTests(unittest.TestCase):
+    def test_auto_mode_button_enqueues_set_mode_command(self):
+        app = QApplication.instance() or QApplication([])
+        serial_manager = FakeSerialManager()
+        window = MainWindow(serial_manager=serial_manager, now_ms=lambda: 10_000)
+        window.connect_selected_port("COM3")
+        window.scheduler.tick()
+        window.process_incoming_line("*PONG 12")  # mark ready
+        window.control_panel.auto_mode_button.click()
+        # Check the scheduler queue contains a SET:MODE command
+        queue_texts = [req.text for req in window.scheduler._queue]
+        mode_commands = [c for c in queue_texts if c.startswith("*SET:MODE")]
+        self.assertEqual(len(mode_commands), 1)
+        self.assertIn(mode_commands[0], ["*SET:MODE DAY", "*SET:MODE NIGHT"])
+
     def test_pong_marks_ready_and_updates_status(self):
         app = QApplication.instance() or QApplication([])
         serial_manager = FakeSerialManager()

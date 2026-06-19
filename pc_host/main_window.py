@@ -10,6 +10,7 @@ from pc_host.protocol import parse_line
 from pc_host.serial_manager import SerialManager
 from pc_host.services.daynight_service import compute_mode
 from pc_host.services.ntp_service import build_sync_requests, fetch_ntp_datetime
+from astral import Observer
 from pc_host.widgets.control_panel import ControlPanel
 from pc_host.widgets.log_panel import LogPanel
 from pc_host.widgets.status_bar import StatusBarWidget
@@ -38,6 +39,7 @@ class MainWindow(QMainWindow):
         self.control_panel.disconnect_requested.connect(self.disconnect_serial)
         self.control_panel.refresh_requested.connect(self.refresh_ports)
         self.control_panel.ntp_requested.connect(self.run_ntp_sync)
+        self.control_panel.auto_mode_requested.connect(self._on_auto_mode_requested)
 
         top_row = QHBoxLayout()
         top_row.addWidget(self.control_panel, 3)
@@ -133,3 +135,9 @@ class MainWindow(QMainWindow):
     def run_auto_mode(self, observer, when, timezone_name: str) -> None:
         mode = compute_mode(observer, when, timezone_name)
         self.handle_command_request(CommandRequest(f"*SET:MODE {mode}"))
+
+    def _on_auto_mode_requested(self) -> None:
+        from datetime import datetime, timezone
+        observer = Observer(latitude=31.2304, longitude=121.4737)
+        when = datetime.now(timezone.utc)
+        self.run_auto_mode(observer, when, "Asia/Shanghai")
