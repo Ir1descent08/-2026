@@ -1,0 +1,7 @@
+PyQt5
+pyqt5-tools
+pyserial
+ntplib
+requests
+astral
+matplotlib
