@@ -1,6 +1,8 @@
 # pc_host/main_window.py
 import time
+from pathlib import Path
 from typing import Callable, Optional
+import requests
 from PyQt5.QtCore import QTimer
 from PyQt5.QtWidgets import QHBoxLayout, QMainWindow, QVBoxLayout, QWidget
 from pc_host.command_scheduler import CommandScheduler
@@ -8,8 +10,10 @@ from pc_host.commands import CommandRequest, query_name_for
 from pc_host.device_state import DeviceState
 from pc_host.protocol import parse_line
 from pc_host.serial_manager import SerialManager
+from pc_host.services.chart_service import append_history_row, build_history_figure
 from pc_host.services.daynight_service import compute_mode
 from pc_host.services.ntp_service import build_sync_requests, fetch_ntp_datetime
+from pc_host.services.weather_service import fetch_weather
 from astral import Observer
 from pc_host.widgets.control_panel import ControlPanel
 from pc_host.widgets.log_panel import LogPanel
@@ -34,12 +38,16 @@ class MainWindow(QMainWindow):
         self.twin_panel = TwinPanel()
         self.log_panel = LogPanel()
 
+        self.history_csv = Path("pc_host_history.csv")
+
         self.control_panel.command_requested.connect(self.handle_command_request)
         self.control_panel.connect_requested.connect(self.connect_selected_port)
         self.control_panel.disconnect_requested.connect(self.disconnect_serial)
         self.control_panel.refresh_requested.connect(self.refresh_ports)
         self.control_panel.ntp_requested.connect(self.run_ntp_sync)
         self.control_panel.auto_mode_requested.connect(self._on_auto_mode_requested)
+        self.control_panel.weather_requested.connect(self.run_weather_fetch)
+        self.control_panel.chart_requested.connect(self.export_history_chart)
 
         top_row = QHBoxLayout()
         top_row.addWidget(self.control_panel, 3)
@@ -141,3 +149,13 @@ class MainWindow(QMainWindow):
         observer = Observer(latitude=31.2304, longitude=121.4737)
         when = datetime.now(timezone.utc)
         self.run_auto_mode(observer, when, "Asia/Shanghai")
+
+    def run_weather_fetch(self, location: str = "Shanghai") -> None:
+        temp_c, condition = fetch_weather(requests.Session(), location)
+        append_history_row(str(self.history_csv), "weather", f"{temp_c}:{condition}")
+        self.log_panel.append_entry("reply", f"weather {temp_c}C {condition}")
+
+    def export_history_chart(self):
+        figure = build_history_figure(str(self.history_csv))
+        figure.savefig("pc_host_history.png")
+        self.log_panel.append_entry("reply", "saved pc_host_history.png")

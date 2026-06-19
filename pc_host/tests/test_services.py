@@ -1,8 +1,12 @@
+import csv
+import tempfile
 import unittest
 from datetime import datetime, timezone
 from astral import Observer
+from pc_host.services.chart_service import append_history_row, build_history_figure
 from pc_host.services.daynight_service import compute_mode
 from pc_host.services.ntp_service import build_sync_requests, fetch_ntp_datetime
+from pc_host.services.weather_service import fetch_weather
 
 
 class FakeNtpResponse:
@@ -30,3 +34,34 @@ class ServiceTests(unittest.TestCase):
         # 04:00 UTC = 12:00 noon Shanghai time (clearly daytime)
         mode = compute_mode(observer, datetime(2026, 6, 18, 4, 0, 0, tzinfo=timezone.utc), "Asia/Shanghai")
         self.assertEqual(mode, "DAY")
+
+
+class FakeWeatherResponse:
+    def json(self):
+        return {
+            "current_condition": [
+                {"temp_C": "28", "weatherDesc": [{"value": "Sunny"}]}
+            ]
+        }
+
+    def raise_for_status(self):
+        return None
+
+
+class FakeSession:
+    def get(self, url, params=None, timeout=5):
+        return FakeWeatherResponse()
+
+
+class WeatherAndChartTests(unittest.TestCase):
+    def test_fetch_weather_returns_temperature_and_condition(self):
+        temp_c, condition = fetch_weather(FakeSession(), "Shanghai")
+        self.assertEqual(temp_c, 28)
+        self.assertEqual(condition, "Sunny")
+
+    def test_chart_service_writes_rows_and_builds_a_figure(self):
+        with tempfile.NamedTemporaryFile("w+", delete=False) as handle:
+            append_history_row(handle.name, "ntp_sync", "OK")
+            append_history_row(handle.name, "mode", "DAY")
+            figure = build_history_figure(handle.name)
+            self.assertEqual(len(figure.axes), 1)
