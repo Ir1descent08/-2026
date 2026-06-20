@@ -41,19 +41,19 @@
 #define BOOT_PHASE_VERSION          7
 #define BOOT_ID_TEXT                "31910429"
 #define BOOT_NAME_TEXT              "FANSIZHE"
-#define BOOT_VERSION_TEXT           "0.0.1"
+#define BOOT_VERSION_TEXT           "V 1.0"
 #define SW_DEBUG_DISABLE_DISPLAY_AFTER_BOOT 0
 #define BEEP_PWM_PERIOD             8000
 #define DEFAULT_YEAR                2026
-#define DEFAULT_MONTH               1
-#define DEFAULT_DATE                1
-#define DEFAULT_HOUR                0
+#define DEFAULT_MONTH               7
+#define DEFAULT_DATE                17
+#define DEFAULT_HOUR                8
 #define DEFAULT_MINUTE              0
 #define DEFAULT_SECOND              0
 #define DEFAULT_ALARM_BEEP_MS       1000
 #define KEY_EVENT_NONE              0
-#define KEY_EVENT_PANEL_DISP        1
-#define KEY_EVENT_PANEL_FORMAT      2
+#define KEY_EVENT_USER1             1
+#define KEY_EVENT_USER2             2
 #define KEY_EVENT_FUNC              3
 #define KEY_EVENT_SAVE              4
 #define KEY_EVENT_DISP              5
@@ -125,11 +125,13 @@ static void HandleSetFormat(char *tokens[], uint8_t count);
 static void HandleSetMode(char *tokens[], uint8_t count);
 static void HandleGetDisplay(char *tokens[], uint8_t count);
 static void HandleGetFormat(char *tokens[], uint8_t count);
+static void HandleGetLed(char *tokens[], uint8_t count);
 static void HandleSetLed(char *tokens[], uint8_t count);
 static void HandleSetBeep(char *tokens[], uint8_t count);
 static void HandleSetKey(char *tokens[], uint8_t count);
 static void HandleSetMsg(char *cursor);
 static void ApplyLedOutput(void);
+static uint8_t ComputeLedOutput(void);
 static void ApplyDisplayOutput(void);
 static void AdvanceBootSequence(void);
 static void UpdateDisplayBuffer(void);
@@ -157,6 +159,7 @@ static uint8_t DaysInMonth(uint16_t year, uint8_t month);
 static bool IsValidDate(uint16_t year, uint8_t month, uint8_t date);
 static void AdvanceClockOneSecond(void);
 static void CheckAlarmTrigger(void);
+static void IncrementEditField(void);
 
 uint32_t ui32SysClock;
 
@@ -199,6 +202,30 @@ static volatile uint16_t g_scroll_elapsed_ms;
 static volatile uint8_t g_scroll_offset;
 static volatile uint8_t g_beep_output_state;
 static volatile uint8_t g_display_dot_mask;
+static volatile uint8_t g_edit_mode;
+static volatile uint8_t g_edit_field;
+static volatile uint8_t g_edit_blink_phase;
+static volatile uint16_t g_edit_blink_timer;
+static volatile uint8_t g_func_key_held;
+static volatile uint16_t g_func_hold_timer;
+static volatile uint8_t g_add_key_held;
+static volatile uint16_t g_add_hold_timer;
+static volatile uint16_t g_add_repeat_timer;
+static volatile uint8_t g_alarm_ringing;
+static volatile uint16_t g_alarm_ring_total_ms;
+static volatile uint8_t g_alarm_beep_phase;
+static volatile uint16_t g_alarm_beep_phase_ms;
+static volatile uint8_t g_msg_auto_show;
+static volatile uint16_t g_msg_auto_timer;
+static volatile uint8_t g_led_override;
+static volatile uint8_t g_led_override_value;
+static volatile uint16_t g_led_override_timer;
+static volatile uint8_t g_led_heartbeat_phase;
+static volatile uint16_t g_led_timer;
+static volatile uint16_t g_led_uart_timer;
+static volatile uint8_t g_led_breath_step;
+static volatile uint16_t g_led_evt_timer;
+static volatile uint8_t g_led_heartbeat_timer;
 static volatile char g_uart_lines[2][UART_FRAME_MAX_LEN + 1];
 static char g_message[MSG_MAX_LEN + 1];
 static char g_last_key[KEY_NAME_MAX_LEN + 1];
@@ -244,6 +271,7 @@ void Delay(uint32_t value)
 
 static void UARTStringPut(const char *message)
 {
+    g_led_uart_timer = 2;
     while (*message != '\0')
     {
         UARTCharPut(UART0_BASE, *message++);
@@ -281,9 +309,9 @@ static void ResetClockState(void)
     g_now.hour = DEFAULT_HOUR;
     g_now.minute = DEFAULT_MINUTE;
     g_now.second = DEFAULT_SECOND;
-    g_alarm_hour = DEFAULT_HOUR;
-    g_alarm_minute = DEFAULT_MINUTE;
-    g_alarm_second = DEFAULT_SECOND;
+    g_alarm_hour = 0;
+    g_alarm_minute = 0;
+    g_alarm_second = 0;
     g_alarm_enabled = 0;
     g_display_on = 1;
     g_format_left = 1;
@@ -334,6 +362,30 @@ static void ResetProtocolState(void)
     g_scroll_offset = 0;
     g_beep_output_state = 0;
     g_mode_day = 1;
+    g_edit_mode = 0;
+    g_edit_field = 0;
+    g_edit_blink_phase = 1;
+    g_edit_blink_timer = 0;
+    g_func_key_held = 0;
+    g_func_hold_timer = 0;
+    g_add_key_held = 0;
+    g_add_hold_timer = 0;
+    g_add_repeat_timer = 0;
+    g_alarm_ringing = 0;
+    g_alarm_ring_total_ms = 0;
+    g_alarm_beep_phase = 0;
+    g_alarm_beep_phase_ms = 0;
+    g_msg_auto_show = 0;
+    g_msg_auto_timer = 0;
+    g_led_override = 0;
+    g_led_override_value = 0;
+    g_led_override_timer = 0;
+    g_led_heartbeat_phase = 0;
+    g_led_timer = 0;
+    g_led_uart_timer = 0;
+    g_led_breath_step = 0;
+    g_led_evt_timer = 0;
+    g_led_heartbeat_timer = 0;
     ResetClockState();
 }
 
@@ -407,8 +459,10 @@ static void ProcessCommand(char *line)
             UARTReplyError("SYNTAX");
             return;
         }
+        g_led_override = 0;
         ResetClockState();
         ApplyDisplayOutput();
+        ApplyLedOutput();
         UARTReplyOK(0);
         return;
     }
@@ -553,6 +607,11 @@ static void HandleGetCommand(char *subcommand, char *cursor)
     if (MatchToken(subcommand, "FORMAT"))
     {
         HandleGetFormat(tokens, count);
+        return;
+    }
+    if (MatchToken(subcommand, "LED"))
+    {
+        HandleGetLed(tokens, count);
         return;
     }
 
@@ -1169,7 +1228,11 @@ static void HandleGetTime(char *tokens[], uint8_t count)
 
     if (count == 0)
     {
-        BuildCompactTimeText(response, sizeof(response));
+        snprintf(response, sizeof(response), "%02u.%02u.%02u", now.hour, now.minute, now.second);
+        if (g_format_left == 0)
+        {
+            ReverseText(response);
+        }
         UARTReplyOK(response);
         return;
     }
@@ -1216,7 +1279,11 @@ static void HandleGetAlarm(char *tokens[], uint8_t count)
 
     if (count == 0)
     {
-        BuildCompactAlarmText(response, sizeof(response));
+        snprintf(response, sizeof(response), "%02u.%02u.%02u", g_alarm_hour, g_alarm_minute, g_alarm_second);
+        if (g_format_left == 0)
+        {
+            ReverseText(response);
+        }
         UARTReplyOK(response);
         return;
     }
@@ -1331,6 +1398,7 @@ static void HandleSetMode(char *tokens[], uint8_t count)
         g_mode_day = 1;
         g_scroll_speed_ms = SCROLL_FAST_MS;
         g_display_dirty = 1;
+        UARTStringPut("*EVT:MODE DAY\r\n");
         UARTReplyOK(0);
         return;
     }
@@ -1339,6 +1407,7 @@ static void HandleSetMode(char *tokens[], uint8_t count)
         g_mode_day = 0;
         g_scroll_speed_ms = SCROLL_SLOW_MS;
         g_display_dirty = 1;
+        UARTStringPut("*EVT:MODE NIGHT\r\n");
         UARTReplyOK(0);
         return;
     }
@@ -1368,6 +1437,19 @@ static void HandleGetFormat(char *tokens[], uint8_t count)
     UARTReplyOK((g_format_left != 0) ? "LEFT" : "RIGHT");
 }
 
+static void HandleGetLed(char *tokens[], uint8_t count)
+{
+    char response[8];
+    (void)tokens;
+    if (count != 0)
+    {
+        UARTReplyError("PARAM");
+        return;
+    }
+    snprintf(response, sizeof(response), "%02X", ComputeLedOutput());
+    UARTReplyOK(response);
+}
+
 static void HandleSetLed(char *tokens[], uint8_t count)
 {
     uint8_t value;
@@ -1384,7 +1466,16 @@ static void HandleSetLed(char *tokens[], uint8_t count)
         return;
     }
 
-    g_led_value = value;
+    if (value == 0)
+    {
+        g_led_override = 0;
+    }
+    else
+    {
+        g_led_override = 1;
+        g_led_override_value = value;
+        g_led_override_timer = 0;
+    }
     ApplyLedOutput();
     UARTReplyOK(0);
 }
@@ -1456,14 +1547,69 @@ static void HandleSetMsg(char *cursor)
     }
 
     memcpy(g_message, cursor, length + 1);
+    g_edit_mode = 0;
+    g_edit_field = 0;
     g_scroll_offset = 0;
     g_scroll_elapsed_ms = 0;
+    g_display_page = 2;
+    g_msg_auto_show = 1;
+    g_msg_auto_timer = 0;
     g_display_dirty = 1;
     UARTReplyOK(0);
 }
 
+static uint8_t ComputeLedOutput(void)
+{
+    uint8_t led;
+
+    if (g_led_override != 0)
+    {
+        return g_led_override_value;
+    }
+
+    led = 0;
+
+    if (g_led_heartbeat_phase != 0)
+    {
+        led |= 0x01u;
+    }
+
+    if (g_alarm_ringing != 0)
+    {
+        if ((g_alarm_beep_phase_ms / 50u) & 1u)
+        {
+            led |= 0x02u;
+        }
+    }
+    else if (g_alarm_enabled != 0)
+    {
+        led |= 0x02u;
+    }
+
+    if (g_edit_mode != 0)
+    {
+        led |= 0x04u;
+    }
+
+    if (g_led_uart_timer > 0)
+    {
+        led |= 0x08u;
+    }
+
+    if (g_led_breath_step >= 8u)
+    {
+        led |= 0x20u;
+    }
+
+    return led;
+}
+
 static void ApplyLedOutput(void)
 {
+    if (g_boot_phase == BOOT_PHASE_DONE)
+    {
+        g_led_value = ComputeLedOutput();
+    }
     I2C0_WriteByte(PCA9557_I2CADDR, PCA9557_OUTPUT, (uint8_t)(~g_led_value));
 }
 
@@ -1543,12 +1689,19 @@ static void ProcessDisplayTask(void)
     if ((g_display_on != 0) && (g_display_page == 2) && (strlen(g_message) > DISPLAY_DIGITS) &&
         (g_scroll_elapsed_ms >= g_scroll_speed_ms))
     {
-        uint8_t scroll_limit = (uint8_t)(strlen(g_message) + DISPLAY_DIGITS);
+        size_t msg_len = strlen(g_message);
+        uint8_t scroll_limit = (uint8_t)(msg_len + DISPLAY_DIGITS);
+
         g_scroll_elapsed_ms = 0;
         g_scroll_offset++;
         if (g_scroll_offset >= scroll_limit)
         {
             g_scroll_offset = 0;
+            if (g_msg_auto_show != 0)
+            {
+                g_msg_auto_show = 0;
+                g_display_page = 0;
+            }
         }
         g_display_dirty = 1;
     }
@@ -1583,16 +1736,27 @@ static void ProcessKeyTask(void)
     }
 
     g_pending_key_event = KEY_EVENT_NONE;
-    if (event_code == KEY_EVENT_PANEL_DISP)
+
+    if ((g_msg_auto_show != 0) &&
+        (event_code != KEY_EVENT_FUNC) &&
+        (event_code != KEY_EVENT_SAVE) &&
+        (event_code != KEY_EVENT_SHIFT) &&
+        (event_code != KEY_EVENT_ADD))
     {
-        ApplyVirtualKey("DISP");
-        EmitKeyEvent("DISP");
+        g_msg_auto_show = 0;
+        g_display_page = 0;
+        g_display_dirty = 1;
         return;
     }
-    if (event_code == KEY_EVENT_PANEL_FORMAT)
+
+    if (event_code == KEY_EVENT_USER1)
     {
-        ApplyVirtualKey("FORMAT");
-        EmitKeyEvent("FORMAT");
+        EmitKeyEvent("USER1");
+        return;
+    }
+    if (event_code == KEY_EVENT_USER2)
+    {
+        EmitKeyEvent("USER2");
         return;
     }
     if (event_code == KEY_EVENT_FUNC)
@@ -1627,7 +1791,6 @@ static void ProcessKeyTask(void)
     }
     if (event_code == KEY_EVENT_EXT)
     {
-        ApplyVirtualKey("EXT");
         EmitKeyEvent("EXT");
         return;
     }
@@ -1687,6 +1850,45 @@ static void UpdateDisplayBuffer(void)
         }
     }
 
+    if (g_edit_mode != 0)
+    {
+        if (g_edit_mode == 1)
+        {
+            BuildCompactDateText(text, sizeof(text));
+        }
+        else if (g_edit_mode == 2)
+        {
+            BuildCompactTimeText(text, sizeof(text));
+        }
+        else
+        {
+            BuildCompactAlarmText(text, sizeof(text));
+        }
+        FillDisplayText(text);
+
+        if ((g_edit_mode != 3) || (g_alarm_enabled != 0))
+        {
+            uint8_t dot_start = (g_format_left != 0) ? 0u : (DISPLAY_DIGITS - 6u);
+            g_display_dot_mask = (uint8_t)((1u << (dot_start + 1u)) | (1u << (dot_start + 3u)));
+        }
+
+        if (g_edit_blink_phase == 0)
+        {
+            uint8_t pos;
+            if (g_format_left != 0)
+            {
+                pos = g_edit_field * 2u;
+            }
+            else
+            {
+                pos = 6u - g_edit_field * 2u;
+            }
+            g_display_chars[pos] = ' ';
+            g_display_chars[pos + 1u] = ' ';
+        }
+        return;
+    }
+
     if ((g_display_page == 2) && (g_message[0] != '\0'))
     {
         size_t length = strlen(g_message);
@@ -1698,17 +1900,26 @@ static void UpdateDisplayBuffer(void)
         {
             int base;
             uint8_t index;
-            uint8_t text_index = 0;
+            uint8_t text_index;
             uint8_t pending_next_dot = 0;
             memset(text, ' ', DISPLAY_DIGITS);
             text[DISPLAY_DIGITS] = '\0';
             if (g_format_left != 0)
             {
                 base = (int)g_scroll_offset;
+                text_index = 0;
             }
             else
             {
-                base = (int)length - DISPLAY_DIGITS - (int)g_scroll_offset;
+                base = (int)(length - 1u) - (int)g_scroll_offset;
+                if (base < 0)
+                {
+                    text_index = (uint8_t)(-base);
+                }
+                else
+                {
+                    text_index = 0;
+                }
             }
             for (index = 0; index < DISPLAY_DIGITS; index++)
             {
@@ -1755,11 +1966,19 @@ static void UpdateDisplayBuffer(void)
     {
         BuildCompactDateText(text, sizeof(text));
         FillDisplayText(text);
+        {
+            uint8_t dot_start = (g_format_left != 0) ? 0u : (DISPLAY_DIGITS - 6u);
+            g_display_dot_mask = (uint8_t)((1u << (dot_start + 1u)) | (1u << (dot_start + 3u)));
+        }
         return;
     }
 
     BuildCompactTimeText(text, sizeof(text));
     FillDisplayText(text);
+    {
+        uint8_t dot_start = (g_format_left != 0) ? 0u : (DISPLAY_DIGITS - 6u);
+        g_display_dot_mask = (uint8_t)((1u << (dot_start + 1u)) | (1u << (dot_start + 3u)));
+    }
 }
 
 static void FillDisplayText(const char *text)
@@ -1808,7 +2027,7 @@ static void ReverseText(char *text)
 
 static void BuildCompactDateText(char *text, size_t size)
 {
-    snprintf(text, size, "%02u.%02u.%02u", g_now.year % 100, g_now.month, g_now.date);
+    snprintf(text, size, "%02u%02u%02u", g_now.year % 100, g_now.month, g_now.date);
     if (g_format_left == 0)
     {
         ReverseText(text);
@@ -1817,7 +2036,7 @@ static void BuildCompactDateText(char *text, size_t size)
 
 static void BuildCompactTimeText(char *text, size_t size)
 {
-    snprintf(text, size, "%02u.%02u.%02u", g_now.hour, g_now.minute, g_now.second);
+    snprintf(text, size, "%02u%02u%02u", g_now.hour, g_now.minute, g_now.second);
     if (g_format_left == 0)
     {
         ReverseText(text);
@@ -1832,7 +2051,7 @@ static void BuildCompactAlarmText(char *text, size_t size)
         return;
     }
 
-    snprintf(text, size, "%02u.%02u.%02u", g_alarm_hour, g_alarm_minute, g_alarm_second);
+    snprintf(text, size, "%02u%02u%02u", g_alarm_hour, g_alarm_minute, g_alarm_second);
     if (g_format_left == 0)
     {
         ReverseText(text);
@@ -1919,6 +2138,8 @@ static uint8_t EncodeDisplayChar(char c)
         return 0x78;
     case 'U':
         return 0x3e;
+    case 'V':
+        return 0x1c;
     case 'W':
         return 0x3e;
     case 'Y':
@@ -1937,8 +2158,8 @@ static uint8_t EncodeDisplayChar(char c)
 static void SampleBoardKeys(void)
 {
     static const uint8_t event_map[8] = {
-        KEY_EVENT_FUNC, KEY_EVENT_SAVE, KEY_EVENT_DISP, KEY_EVENT_SPEED,
-        KEY_EVENT_FORMAT, KEY_EVENT_EXT, KEY_EVENT_SHIFT, KEY_EVENT_ADD
+        KEY_EVENT_FUNC, KEY_EVENT_SHIFT, KEY_EVENT_ADD, KEY_EVENT_SAVE,
+        KEY_EVENT_DISP, KEY_EVENT_SPEED, KEY_EVENT_FORMAT, KEY_EVENT_EXT
     };
     uint8_t key_value;
     uint8_t temp;
@@ -1956,7 +2177,7 @@ static void SampleBoardKeys(void)
         else if (g_key_disp_state == 0)
         {
             g_key_disp_state = 1;
-            QueueKeyEvent(KEY_EVENT_PANEL_DISP);
+            QueueKeyEvent(KEY_EVENT_USER1);
         }
     }
     else
@@ -1974,7 +2195,7 @@ static void SampleBoardKeys(void)
         else if (g_key_format_state == 0)
         {
             g_key_format_state = 1;
-            QueueKeyEvent(KEY_EVENT_PANEL_FORMAT);
+            QueueKeyEvent(KEY_EVENT_USER2);
         }
     }
     else
@@ -2010,14 +2231,50 @@ static void SampleBoardKeys(void)
             g_board_key_debounce_count = 0;
             active_mask = (uint8_t)(~g_board_key_stable_value);
             g_board_key_state_mask = active_mask;
-            for (index = 0; index < 8; index++)
+            for (index = 1; index < 8; index++)
             {
+                if (index == 2)
+                {
+                    continue;
+                }
                 key_mask = (uint8_t)(1u << index);
                 if (((active_mask & key_mask) != 0) && ((old_active_mask & key_mask) == 0))
                 {
                     QueueKeyEvent(event_map[index]);
                     break;
                 }
+            }
+
+            key_mask = 0x01u;
+            if (((active_mask & key_mask) != 0) && ((old_active_mask & key_mask) == 0))
+            {
+                g_func_key_held = 1;
+                g_func_hold_timer = 0;
+            }
+            if (((active_mask & key_mask) == 0) && ((old_active_mask & key_mask) != 0))
+            {
+                g_func_key_held = 0;
+                if (g_func_hold_timer >= 800)
+                {
+                    QueueKeyEvent(KEY_EVENT_SAVE);
+                }
+                else
+                {
+                    QueueKeyEvent(KEY_EVENT_FUNC);
+                }
+            }
+
+            key_mask = 0x04u;
+            if (((active_mask & key_mask) != 0) && ((old_active_mask & key_mask) == 0))
+            {
+                g_add_key_held = 1;
+                g_add_hold_timer = 0;
+                g_add_repeat_timer = 0;
+                QueueKeyEvent(KEY_EVENT_ADD);
+            }
+            if (((active_mask & key_mask) == 0) && ((old_active_mask & key_mask) != 0))
+            {
+                g_add_key_held = 0;
             }
         }
     }
@@ -2090,7 +2347,43 @@ static void ApplyVirtualKey(const char *name)
         return;
     }
 
-    if (MatchToken(name, "TIME") || MatchToken(name, "USER1") || MatchToken(name, "FUNC"))
+    if (MatchToken(name, "FUNC"))
+    {
+        if (g_alarm_ringing != 0)
+        {
+            g_alarm_ringing = 0;
+            g_beep_output_state = 0;
+            SetBeepOutput(0);
+            UARTStringPut("*EVT:ALARM_OFF\r\n");
+            return;
+        }
+        if (g_edit_mode == 0)
+        {
+            g_edit_mode = 1;
+            g_edit_field = 0;
+        }
+        else
+        {
+            g_edit_mode++;
+            if (g_edit_mode > 3)
+            {
+                g_edit_mode = 0;
+            }
+            g_edit_field = 0;
+        }
+        if (g_edit_mode == 3)
+        {
+            g_alarm_enabled = 1;
+        }
+        g_edit_blink_phase = 1;
+        g_edit_blink_timer = 0;
+        g_scroll_offset = 0;
+        g_scroll_elapsed_ms = 0;
+        g_display_dirty = 1;
+        return;
+    }
+
+    if (MatchToken(name, "TIME") || MatchToken(name, "USER1"))
     {
         g_display_page = 0;
         g_scroll_offset = 0;
@@ -2101,6 +2394,33 @@ static void ApplyVirtualKey(const char *name)
 
     if (MatchToken(name, "DATE") || MatchToken(name, "USER2") || MatchToken(name, "SAVE"))
     {
+        if (g_edit_mode != 0)
+        {
+            uint8_t saved_mode = g_edit_mode;
+            char edit_msg[32];
+            g_edit_mode = 0;
+            g_edit_field = 0;
+            if (saved_mode == 1)
+            {
+                snprintf(edit_msg, sizeof(edit_msg), "EDIT DATE %02u%02u%02u",
+                         g_now.year % 100, g_now.month, g_now.date);
+            }
+            else if (saved_mode == 2)
+            {
+                snprintf(edit_msg, sizeof(edit_msg), "EDIT TIME %02u%02u%02u",
+                         g_now.hour, g_now.minute, g_now.second);
+            }
+            else
+            {
+                snprintf(edit_msg, sizeof(edit_msg), "EDIT ALARM %02u%02u%02u",
+                         g_alarm_hour, g_alarm_minute, g_alarm_second);
+            }
+            UARTStringPut("*EVT:");
+            UARTStringPut(edit_msg);
+            UARTStringPut("\r\n");
+            g_display_dirty = 1;
+            return;
+        }
         g_display_page = 1;
         g_scroll_offset = 0;
         g_scroll_elapsed_ms = 0;
@@ -2140,15 +2460,26 @@ static void ApplyVirtualKey(const char *name)
 
     if (MatchToken(name, "SHIFT"))
     {
+        if (g_edit_mode != 0)
+        {
+            g_edit_field++;
+            if (g_edit_field > 2)
+            {
+                g_edit_field = 0;
+            }
+            g_edit_blink_phase = 1;
+            g_edit_blink_timer = 0;
+        }
         g_display_dirty = 1;
         return;
     }
 
     if (MatchToken(name, "ADD"))
     {
-        g_beep_remaining_ms = 200;
-        g_beep_output_state = 1;
-        SetBeepOutput(1);
+        if (g_edit_mode != 0)
+        {
+            IncrementEditField();
+        }
         return;
     }
 }
@@ -2472,14 +2803,160 @@ static void AdvanceClockOneSecond(void)
 static void CheckAlarmTrigger(void)
 {
     if ((g_alarm_enabled != 0) &&
+        (g_alarm_ringing == 0) &&
         (g_now.hour == g_alarm_hour) &&
         (g_now.minute == g_alarm_minute) &&
         (g_now.second == g_alarm_second))
     {
-        g_beep_remaining_ms = DEFAULT_ALARM_BEEP_MS;
+        g_alarm_ringing = 1;
+        g_alarm_ring_total_ms = 0;
+        g_alarm_beep_phase_ms = 0;
+        g_alarm_beep_phase = 1;
         g_beep_output_state = 1;
         SetBeepOutput(1);
+        UARTStringPut("*EVT:ALARM\r\n");
     }
+}
+
+static void IncrementEditField(void)
+{
+    uint8_t max_day;
+
+    switch (g_edit_mode)
+    {
+    case 1:
+        switch (g_edit_field)
+        {
+        case 0:
+            g_now.year++;
+            if (g_now.year > 2099)
+            {
+                g_now.year = 2000;
+            }
+            break;
+        case 1:
+            g_now.month++;
+            if (g_now.month > 12)
+            {
+                g_now.month = 1;
+                g_now.year++;
+                if (g_now.year > 2099)
+                {
+                    g_now.year = 2000;
+                }
+            }
+            max_day = DaysInMonth(g_now.year, g_now.month);
+            if (g_now.date > max_day)
+            {
+                g_now.date = max_day;
+            }
+            break;
+        default:
+            g_now.date++;
+            max_day = DaysInMonth(g_now.year, g_now.month);
+            if (g_now.date > max_day)
+            {
+                g_now.date = 1;
+                g_now.month++;
+                if (g_now.month > 12)
+                {
+                    g_now.month = 1;
+                    g_now.year++;
+                    if (g_now.year > 2099)
+                    {
+                        g_now.year = 2000;
+                    }
+                }
+            }
+            break;
+        }
+        break;
+    case 2:
+        switch (g_edit_field)
+        {
+        case 0:
+            g_now.hour++;
+            if (g_now.hour > 23)
+            {
+                g_now.hour = 0;
+            }
+            break;
+        case 1:
+            g_now.minute++;
+            if (g_now.minute > 59)
+            {
+                g_now.minute = 0;
+                g_now.hour++;
+                if (g_now.hour > 23)
+                {
+                    g_now.hour = 0;
+                }
+            }
+            break;
+        default:
+            g_now.second++;
+            if (g_now.second > 59)
+            {
+                g_now.second = 0;
+                g_now.minute++;
+                if (g_now.minute > 59)
+                {
+                    g_now.minute = 0;
+                    g_now.hour++;
+                    if (g_now.hour > 23)
+                    {
+                        g_now.hour = 0;
+                    }
+                }
+            }
+            break;
+        }
+        break;
+    default:
+        g_alarm_enabled = 1;
+        switch (g_edit_field)
+        {
+        case 0:
+            g_alarm_hour++;
+            if (g_alarm_hour > 23)
+            {
+                g_alarm_hour = 0;
+            }
+            break;
+        case 1:
+            g_alarm_minute++;
+            if (g_alarm_minute > 59)
+            {
+                g_alarm_minute = 0;
+                g_alarm_hour++;
+                if (g_alarm_hour > 23)
+                {
+                    g_alarm_hour = 0;
+                }
+            }
+            break;
+        default:
+            g_alarm_second++;
+            if (g_alarm_second > 59)
+            {
+                g_alarm_second = 0;
+                g_alarm_minute++;
+                if (g_alarm_minute > 59)
+                {
+                    g_alarm_minute = 0;
+                    g_alarm_hour++;
+                    if (g_alarm_hour > 23)
+                    {
+                        g_alarm_hour = 0;
+                    }
+                }
+            }
+            break;
+        }
+        break;
+    }
+
+    g_display_dirty = 1;
 }
 
 void S800_PWM_Init(void)
@@ -2622,10 +3099,30 @@ void SysTick_Handler(void)
     if (g_beep_remaining_ms != 0)
     {
         g_beep_remaining_ms--;
-        if (g_beep_remaining_ms == 0)
+        if ((g_beep_remaining_ms == 0) && (g_alarm_ringing == 0))
         {
             g_beep_output_state = 0;
             SetBeepOutput(0);
+        }
+    }
+
+    if (g_alarm_ringing != 0)
+    {
+        g_alarm_ring_total_ms++;
+        g_alarm_beep_phase_ms++;
+        if (g_alarm_ring_total_ms >= 10000u)
+        {
+            g_alarm_ringing = 0;
+            g_beep_output_state = 0;
+            SetBeepOutput(0);
+            UARTStringPut("*EVT:ALARM_OFF\r\n");
+        }
+        else if (g_alarm_beep_phase_ms >= 200u)
+        {
+            g_alarm_beep_phase_ms = 0;
+            g_alarm_beep_phase ^= 1u;
+            g_beep_output_state = g_alarm_beep_phase;
+            SetBeepOutput(g_alarm_beep_phase);
         }
     }
 
@@ -2646,6 +3143,130 @@ void SysTick_Handler(void)
     if ((g_display_on != 0) && (g_display_page == 2) && (strlen(g_message) > DISPLAY_DIGITS))
     {
         g_scroll_elapsed_ms++;
+    }
+
+    if (g_func_key_held != 0)
+    {
+        g_func_hold_timer++;
+    }
+
+    if ((g_add_key_held != 0) && (g_edit_mode != 0))
+    {
+        g_add_hold_timer++;
+        if (g_add_hold_timer >= 500u)
+        {
+            g_add_repeat_timer++;
+            if (g_add_repeat_timer >= 200u)
+            {
+                g_add_repeat_timer = 0;
+                QueueKeyEvent(KEY_EVENT_ADD);
+            }
+        }
+    }
+
+    if ((g_msg_auto_show != 0) && (strlen(g_message) <= DISPLAY_DIGITS))
+    {
+        g_msg_auto_timer++;
+        if (g_msg_auto_timer >= 2500u)
+        {
+            g_msg_auto_show = 0;
+            g_display_page = 0;
+            g_display_dirty = 1;
+        }
+    }
+
+    if (g_edit_mode != 0)
+    {
+        g_edit_blink_timer++;
+        if (g_edit_blink_timer >= 500)
+        {
+            g_edit_blink_timer = 0;
+            g_edit_blink_phase ^= 1u;
+            g_display_dirty = 1;
+        }
+    }
+
+    g_led_timer++;
+    if ((g_led_timer >= 50u) && (g_boot_phase == BOOT_PHASE_DONE))
+    {
+        g_led_timer = 0;
+
+        if (g_led_uart_timer > 0)
+        {
+            g_led_uart_timer--;
+        }
+
+        g_led_breath_step++;
+        if (g_led_breath_step >= 20u)
+        {
+            g_led_breath_step = 0;
+        }
+
+        g_led_heartbeat_timer++;
+        if (g_led_heartbeat_timer >= 10u)
+        {
+            g_led_heartbeat_timer = 0;
+            g_led_heartbeat_phase ^= 1u;
+        }
+
+        if (g_led_override != 0)
+        {
+            g_led_override_timer++;
+            if (g_led_override_timer >= 200u)
+            {
+                g_led_override = 0;
+                ApplyLedOutput();
+            }
+        }
+        else
+        {
+            ApplyLedOutput();
+        }
+    }
+
+    if (g_boot_phase == BOOT_PHASE_DONE)
+    {
+        g_led_evt_timer++;
+        if (g_led_evt_timer >= 1000u)
+        {
+            uint8_t i;
+            char disp_chars[9];
+            char evt_buf[32];
+            uint8_t dp;
+            uint8_t led_val;
+
+            g_led_evt_timer = 0;
+
+            for (i = 0; i < DISPLAY_DIGITS; i++)
+            {
+                char c = g_display_chars[i];
+                if (c == ' ')
+                {
+                    disp_chars[i] = '_';
+                }
+                else if (c == '.')
+                {
+                    disp_chars[i] = '_';
+                }
+                else
+                {
+                    disp_chars[i] = c;
+                }
+            }
+            disp_chars[DISPLAY_DIGITS] = '\0';
+            dp = g_display_dot_mask;
+
+            snprintf(evt_buf, sizeof(evt_buf), "DISP %s %02X", disp_chars, dp);
+            UARTStringPut("*EVT:");
+            UARTStringPut(evt_buf);
+            UARTStringPut("\r\n");
+
+            led_val = ComputeLedOutput();
+            snprintf(evt_buf, sizeof(evt_buf), "LED %02X", led_val);
+            UARTStringPut("*EVT:");
+            UARTStringPut(evt_buf);
+            UARTStringPut("\r\n");
+        }
     }
 
     if (g_boot_splash_ms != 0)
@@ -2676,6 +3297,8 @@ void UART0_Handler(void)
     while (UARTCharsAvail(UART0_BASE))
     {
         char ch = (char)(UARTCharGetNonBlocking(UART0_BASE) & 0xff);
+
+        g_led_uart_timer = 2;
 
         if ((ch == '\r') || (ch == '\n'))
         {
