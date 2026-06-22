@@ -1,8 +1,8 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from PyQt5.QtWidgets import QApplication
 from pc_host.main_window import MainWindow
-from pc_host.serial_manager import SerialManager
+from pc_host.serial_manager import PortEntry, SerialManager
 
 
 class FakeSerialManager(SerialManager):
@@ -12,9 +12,10 @@ class FakeSerialManager(SerialManager):
         self._open = False
         self._lines = []
         self.port_name = ""
-        self.available_ports = ["COM3"]
+        self.available_ports = [PortEntry(label="COM3 - USB Serial Device", device="COM3")]
         self.open_error = None
         self.send_error = None
+        self.poll_error = None
 
     @property
     def is_open(self):
@@ -36,10 +37,12 @@ class FakeSerialManager(SerialManager):
         self.sent.append(text)
 
     def poll_lines(self) -> list[str]:
+        if self.poll_error is not None:
+            raise self.poll_error
         lines, self._lines = self._lines, []
         return lines
 
-    def list_ports(self) -> list[str]:
+    def list_ports(self):
         return list(self.available_ports)
 
 
@@ -68,9 +71,15 @@ class MainWindowFlowTests(unittest.TestCase):
         app = QApplication.instance() or QApplication([])
         serial_manager = FakeSerialManager()
         window = MainWindow(serial_manager=serial_manager, now_ms=lambda: 10_000)
-        window.control_panel.refresh_ports(["COM3", "COM4"])
-        window.control_panel.port_combo.setCurrentText("COM4")
-        serial_manager.available_ports = ["COM4", "COM5"]
+        window.control_panel.refresh_ports([
+            PortEntry(label="COM3 - USB Serial Device", device="COM3"),
+            PortEntry(label="COM4 - XDS110 UART", device="COM4"),
+        ])
+        window.control_panel.port_combo.setCurrentIndex(1)
+        serial_manager.available_ports = [
+            PortEntry(label="COM4 - XDS110 UART", device="COM4"),
+            PortEntry(label="COM5 - USB Serial Device", device="COM5"),
+        ]
         window.refresh_ports()
         self.assertEqual(window.control_panel.selected_port(), "COM4")
 
@@ -156,9 +165,37 @@ class MainWindowFlowTests(unittest.TestCase):
         serial_manager = FakeSerialManager()
         window = MainWindow(serial_manager=serial_manager, now_ms=lambda: 10_000)
         window.log_panel.append_entry("send", "*PING")
-        with patch.object(window.log_panel, "export_to_file") as export_to_file:
+        with patch("pc_host.main_window.QFileDialog.getSaveFileName", return_value=("C:/temp/pc_host_log.txt", "Text Files (*.txt)")), \
+             patch.object(window.log_panel, "export_to_file") as export_to_file:
             window.export_log()
-        export_to_file.assert_called_once()
+        export_to_file.assert_called_once_with("C:/temp/pc_host_log.txt")
+
+    def test_export_history_chart_uses_selected_path(self):
+        app = QApplication.instance() or QApplication([])
+        serial_manager = FakeSerialManager()
+        window = MainWindow(serial_manager=serial_manager, now_ms=lambda: 10_000)
+        close_figure = MagicMock()
+        fake_matplotlib = type("MatplotlibModule", (), {"pyplot": type("PyplotModule", (), {"close": close_figure})()})()
+        with patch("pathlib.Path.exists", return_value=True), \
+             patch("pc_host.main_window.QFileDialog.getSaveFileName", return_value=("C:/temp/out.png", "PNG Files (*.png)")), \
+             patch("pc_host.services.chart_service.build_history_figure") as build_history_figure, \
+             patch.dict("sys.modules", {"matplotlib": fake_matplotlib}):
+            figure = MagicMock()
+            build_history_figure.return_value = figure
+            window.export_history_chart()
+        figure.savefig.assert_called_once_with("C:/temp/out.png")
+        close_figure.assert_called_once_with(figure)
+
+    def test_poll_serial_logs_error_and_disconnects_on_read_failure(self):
+        app = QApplication.instance() or QApplication([])
+        serial_manager = FakeSerialManager()
+        serial_manager.poll_error = OSError("device removed")
+        window = MainWindow(serial_manager=serial_manager, now_ms=lambda: 10_000)
+        window.state.connected = True
+        window.state.port_name = "COM3"
+        window.poll_serial()
+        self.assertFalse(window.state.connected)
+        self.assertIn("serial read failed", window.log_panel.text_edit.toPlainText())
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@ class ControlPanel(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        self._connected = False
         layout = QVBoxLayout(self)
 
         port_box = QGroupBox("串口管理")
@@ -141,18 +142,44 @@ class ControlPanel(QWidget):
     def _emit(self, command: str) -> None:
         self.command_requested.emit(CommandRequest(command, followups_on_ok=build_followups(command)))
 
-    def refresh_ports(self, port_names: list[str]) -> None:
-        current = self.port_combo.currentText()
+    def refresh_ports(self, port_names) -> None:
+        if self.port_combo.view().isVisible():
+            return
+        current = self.selected_port()
+        entries = []
+        for item in port_names:
+            if isinstance(item, tuple):
+                label, device = item
+            elif hasattr(item, "label") and hasattr(item, "device"):
+                label, device = item.label, item.device
+            else:
+                label = str(item)
+                device = str(item)
+            entries.append((label, device))
+
+        current_entries = [
+            (self.port_combo.itemText(index), self.port_combo.itemData(index) or self.port_combo.itemText(index))
+            for index in range(self.port_combo.count())
+        ]
+        if entries == current_entries:
+            self.connect_button.setEnabled((not self._connected) and (self.port_combo.count() > 0))
+            return
+
         self.port_combo.clear()
-        self.port_combo.addItems(port_names)
-        if current in port_names:
-            self.port_combo.setCurrentText(current)
+        for label, device in entries:
+            self.port_combo.addItem(label, device)
+        if current:
+            index = self.port_combo.findData(current)
+            if index >= 0:
+                self.port_combo.setCurrentIndex(index)
+        self.connect_button.setEnabled((not self._connected) and (self.port_combo.count() > 0))
 
     def selected_port(self) -> str:
-        return self.port_combo.currentText()
+        return self.port_combo.currentData() or self.port_combo.currentText()
 
     def set_connected(self, connected: bool) -> None:
-        self.connect_button.setEnabled(not connected)
+        self._connected = connected
+        self.connect_button.setEnabled((not connected) and (self.port_combo.count() > 0))
         self.disconnect_button.setEnabled(connected)
 
     def set_ready_enabled(self, ready: bool) -> None:

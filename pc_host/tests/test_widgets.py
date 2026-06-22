@@ -28,10 +28,11 @@ class ControlPanelTests(unittest.TestCase):
     def test_refresh_ports_keeps_current_selection(self):
         app = QApplication.instance() or QApplication([])
         panel = ControlPanel()
-        panel.refresh_ports(["COM3", "COM4"])
-        panel.port_combo.setCurrentText("COM4")
-        panel.refresh_ports(["COM4", "COM5"])
+        panel.refresh_ports([("COM3 - USB Serial Device", "COM3"), ("COM4 - XDS110 UART", "COM4")])
+        panel.port_combo.setCurrentIndex(1)
+        panel.refresh_ports([("COM4 - XDS110 UART", "COM4"), ("COM5 - USB Serial Device", "COM5")])
         self.assertEqual(panel.selected_port(), "COM4")
+        self.assertEqual(panel.port_combo.currentText(), "COM4 - XDS110 UART")
 
     def test_virtual_key_and_raw_command_emit_expected_text(self):
         app = QApplication.instance() or QApplication([])

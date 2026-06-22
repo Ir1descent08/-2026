@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Callable, Optional
 import requests
 from PyQt5.QtCore import QTimer
-from PyQt5.QtWidgets import QHBoxLayout, QMainWindow, QVBoxLayout, QWidget
+from PyQt5.QtWidgets import QFileDialog, QHBoxLayout, QMainWindow, QVBoxLayout, QWidget
 from pc_host.command_scheduler import CommandScheduler
 from pc_host.commands import CommandRequest, query_name_for
 from pc_host.device_state import DeviceState
@@ -124,7 +124,13 @@ class MainWindow(QMainWindow):
         self.log_panel.append_entry("send", text)
 
     def poll_serial(self) -> None:
-        for line in self.serial_manager.poll_lines():
+        try:
+            lines = self.serial_manager.poll_lines()
+        except Exception as exc:
+            self.log_panel.append_entry("error", f"serial read failed: {exc}")
+            self.disconnect_serial()
+            return
+        for line in lines:
             self.process_incoming_line(line)
 
     def process_incoming_line(self, line: str) -> None:
@@ -229,8 +235,11 @@ class MainWindow(QMainWindow):
             self._auto_mode_last = mode
 
     def export_log(self) -> None:
-        self.log_panel.export_to_file(str(self.log_txt))
-        self.log_panel.append_entry("reply", f"saved {self.log_txt.name}")
+        path, _selected = QFileDialog.getSaveFileName(self, "导出日志", str(self.log_txt), "Text Files (*.txt);;All Files (*)")
+        if not path:
+            return
+        self.log_panel.export_to_file(path)
+        self.log_panel.append_entry("reply", f"saved {Path(path).name}")
 
     def export_history_chart(self):
         from pc_host.services.chart_service import build_history_figure
@@ -238,6 +247,16 @@ class MainWindow(QMainWindow):
         if not self.history_csv.exists():
             self.log_panel.append_entry("error", "no history CSV to export")
             return
+        path, _selected = QFileDialog.getSaveFileName(self, "导出图表", str(Path.cwd() / "pc_host_history.png"), "PNG Files (*.png);;All Files (*)")
+        if not path:
+            return
         figure = build_history_figure(str(self.history_csv))
-        figure.savefig("pc_host_history.png")
-        self.log_panel.append_entry("reply", "saved pc_host_history.png")
+        try:
+            figure.savefig(path)
+        finally:
+            try:
+                from matplotlib import pyplot as plt
+                plt.close(figure)
+            except Exception:
+                pass
+        self.log_panel.append_entry("reply", f"saved {Path(path).name}")
