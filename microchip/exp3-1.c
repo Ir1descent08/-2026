@@ -130,6 +130,7 @@ static void HandleSetLed(char *tokens[], uint8_t count);
 static void HandleSetBeep(char *tokens[], uint8_t count);
 static void HandleSetKey(char *tokens[], uint8_t count);
 static void HandleSetMsg(char *cursor);
+static void HandleSetWeather(char *tokens[], uint8_t count);
 static void ApplyLedOutput(void);
 static uint8_t ComputeLedOutput(void);
 static void ApplyDisplayOutput(void);
@@ -140,6 +141,7 @@ static void ReverseText(char *text);
 static void BuildCompactDateText(char *text, size_t size);
 static void BuildCompactTimeText(char *text, size_t size);
 static void BuildCompactAlarmText(char *text, size_t size);
+static void BuildWeatherText(char *text, size_t size);
 static void RefreshDisplayDigit(void);
 static uint8_t EncodeDisplayChar(char c);
 static void SampleBoardKeys(void);
@@ -226,6 +228,10 @@ static volatile uint16_t g_led_uart_timer;
 static volatile uint8_t g_led_breath_step;
 static volatile uint16_t g_led_evt_timer;
 static volatile uint8_t g_led_heartbeat_timer;
+static volatile uint8_t g_time_synced;
+static volatile uint8_t g_weather_temp;
+static volatile uint8_t g_weather_flags;
+static volatile uint16_t g_weather_show_ms;
 static volatile char g_uart_lines[2][UART_FRAME_MAX_LEN + 1];
 static char g_message[MSG_MAX_LEN + 1];
 static char g_last_key[KEY_NAME_MAX_LEN + 1];
@@ -321,10 +327,14 @@ static void ResetClockState(void)
     g_led_value = 0xff;
     g_beep_remaining_ms = 0;
     g_display_dirty = 1;
-    g_scroll_speed_ms = SCROLL_MEDIUM_MS;
+    g_scroll_speed_ms = SCROLL_FAST_MS;
     g_scroll_elapsed_ms = 0;
     g_scroll_offset = 0;
     g_beep_output_state = 0;
+    g_time_synced = 0;
+    g_weather_temp = 0;
+    g_weather_flags = 0;
+    g_weather_show_ms = 0;
     SetBeepOutput(0);
 }
 
@@ -386,6 +396,10 @@ static void ResetProtocolState(void)
     g_led_breath_step = 0;
     g_led_evt_timer = 0;
     g_led_heartbeat_timer = 0;
+    g_time_synced = 0;
+    g_weather_temp = 0;
+    g_weather_flags = 0;
+    g_weather_show_ms = 0;
     ResetClockState();
 }
 
@@ -561,6 +575,11 @@ static void HandleSetCommand(char *subcommand, char *cursor)
     if (MatchToken(subcommand, "MODE"))
     {
         HandleSetMode(tokens, count);
+        return;
+    }
+    if (MatchToken(subcommand, "WEATHER"))
+    {
+        HandleSetWeather(tokens, count);
         return;
     }
 
@@ -798,6 +817,7 @@ static void HandleSetDate(char *tokens[], uint8_t count)
     g_now.year = year;
     g_now.month = month;
     g_now.date = date;
+    g_time_synced = 1;
     g_display_dirty = 1;
     UARTReplyOK(0);
 }
@@ -976,6 +996,7 @@ static void HandleSetTime(char *tokens[], uint8_t count)
     g_now.hour = hour;
     g_now.minute = minute;
     g_now.second = second;
+    g_time_synced = 1;
     g_display_dirty = 1;
     UARTReplyOK(0);
 }
@@ -1397,7 +1418,16 @@ static void HandleSetMode(char *tokens[], uint8_t count)
     {
         g_mode_day = 1;
         g_scroll_speed_ms = SCROLL_FAST_MS;
+        if (g_beep_remaining_ms != 0)
+        {
+            SetBeepOutput(1);
+        }
+        else if ((g_alarm_ringing != 0) && (g_alarm_beep_phase != 0))
+        {
+            SetBeepOutput(1);
+        }
         g_display_dirty = 1;
+        ApplyLedOutput();
         UARTStringPut("*EVT:MODE DAY\r\n");
         UARTReplyOK(0);
         return;
@@ -1406,7 +1436,9 @@ static void HandleSetMode(char *tokens[], uint8_t count)
     {
         g_mode_day = 0;
         g_scroll_speed_ms = SCROLL_SLOW_MS;
+        SetBeepOutput(0);
         g_display_dirty = 1;
+        ApplyLedOutput();
         UARTStringPut("*EVT:MODE NIGHT\r\n");
         UARTReplyOK(0);
         return;
@@ -1503,7 +1535,7 @@ static void HandleSetBeep(char *tokens[], uint8_t count)
 
     g_beep_remaining_ms = (uint16_t)value;
     g_beep_output_state = 1;
-    SetBeepOutput(1);
+    SetBeepOutput((g_mode_day != 0) ? 1 : 0);
     UARTReplyOK(0);
 }
 
@@ -1558,6 +1590,34 @@ static void HandleSetMsg(char *cursor)
     UARTReplyOK(0);
 }
 
+static void HandleSetWeather(char *tokens[], uint8_t count)
+{
+    uint32_t temp;
+    uint32_t flags;
+
+    if (count != 2)
+    {
+        UARTReplyError("SYNTAX");
+        return;
+    }
+    if (!ParseUnsigned(tokens[0], &temp) || !ParseUnsigned(tokens[1], &flags))
+    {
+        UARTReplyError("PARAM");
+        return;
+    }
+    if ((temp > 99u) || (flags > 7u))
+    {
+        UARTReplyError("RANGE");
+        return;
+    }
+
+    g_weather_temp = (uint8_t)temp;
+    g_weather_flags = (uint8_t)flags;
+    g_display_dirty = 1;
+    ApplyLedOutput();
+    UARTReplyOK(0);
+}
+
 static uint8_t ComputeLedOutput(void)
 {
     uint8_t led;
@@ -1572,6 +1632,11 @@ static uint8_t ComputeLedOutput(void)
     if (g_led_heartbeat_phase != 0)
     {
         led |= 0x01u;
+    }
+
+    if (g_mode_day == 0)
+    {
+        return led;
     }
 
     if (g_alarm_ringing != 0)
@@ -1596,9 +1661,21 @@ static uint8_t ComputeLedOutput(void)
         led |= 0x08u;
     }
 
-    if (g_led_breath_step >= 8u)
+    if (g_time_synced != 0)
+    {
+        led |= 0x10u;
+    }
+    if ((g_weather_flags & 0x01u) != 0)
     {
         led |= 0x20u;
+    }
+    if ((g_weather_flags & 0x02u) != 0)
+    {
+        led |= 0x40u;
+    }
+    if ((g_weather_flags & 0x04u) != 0)
+    {
+        led |= 0x80u;
     }
 
     return led;
@@ -1746,7 +1823,6 @@ static void ProcessKeyTask(void)
         g_msg_auto_show = 0;
         g_display_page = 0;
         g_display_dirty = 1;
-        return;
     }
 
     if (event_code == KEY_EVENT_USER1)
@@ -1756,6 +1832,7 @@ static void ProcessKeyTask(void)
     }
     if (event_code == KEY_EVENT_USER2)
     {
+        ApplyVirtualKey("USER2");
         EmitKeyEvent("USER2");
         return;
     }
@@ -1886,6 +1963,24 @@ static void UpdateDisplayBuffer(void)
             g_display_chars[pos] = ' ';
             g_display_chars[pos + 1u] = ' ';
         }
+        return;
+    }
+
+    if (g_mode_day == 0)
+    {
+        snprintf(text, sizeof(text), "%02u%02u", g_now.hour, g_now.minute);
+        FillDisplayText(text);
+        {
+            uint8_t dot_start = (g_format_left != 0) ? 0u : (DISPLAY_DIGITS - 4u);
+            g_display_dot_mask = (uint8_t)(1u << (dot_start + 1u));
+        }
+        return;
+    }
+
+    if (g_weather_show_ms != 0)
+    {
+        BuildWeatherText(text, sizeof(text));
+        FillDisplayText(text);
         return;
     }
 
@@ -2056,6 +2151,26 @@ static void BuildCompactAlarmText(char *text, size_t size)
     {
         ReverseText(text);
     }
+}
+
+static void BuildWeatherText(char *text, size_t size)
+{
+    if ((g_weather_flags & 0x02u) != 0)
+    {
+        snprintf(text, size, "RAIN%02u", g_weather_temp);
+        return;
+    }
+    if ((g_weather_flags & 0x04u) != 0)
+    {
+        snprintf(text, size, "HOT %02u", g_weather_temp);
+        return;
+    }
+    if ((g_weather_flags & 0x01u) != 0)
+    {
+        snprintf(text, size, "SUN %02u", g_weather_temp);
+        return;
+    }
+    snprintf(text, size, "WTH %02u", g_weather_temp);
 }
 
 static void RefreshDisplayDigit(void)
@@ -2383,7 +2498,7 @@ static void ApplyVirtualKey(const char *name)
         return;
     }
 
-    if (MatchToken(name, "TIME") || MatchToken(name, "USER1"))
+    if (MatchToken(name, "TIME"))
     {
         g_display_page = 0;
         g_scroll_offset = 0;
@@ -2392,7 +2507,12 @@ static void ApplyVirtualKey(const char *name)
         return;
     }
 
-    if (MatchToken(name, "DATE") || MatchToken(name, "USER2") || MatchToken(name, "SAVE"))
+    if (MatchToken(name, "USER1"))
+    {
+        return;
+    }
+
+    if (MatchToken(name, "DATE") || MatchToken(name, "SAVE"))
     {
         if (g_edit_mode != 0)
         {
@@ -2424,6 +2544,13 @@ static void ApplyVirtualKey(const char *name)
         g_display_page = 1;
         g_scroll_offset = 0;
         g_scroll_elapsed_ms = 0;
+        g_display_dirty = 1;
+        return;
+    }
+
+    if (MatchToken(name, "USER2"))
+    {
+        g_weather_show_ms = 5000u;
         g_display_dirty = 1;
         return;
     }
@@ -2813,7 +2940,7 @@ static void CheckAlarmTrigger(void)
         g_alarm_beep_phase_ms = 0;
         g_alarm_beep_phase = 1;
         g_beep_output_state = 1;
-        SetBeepOutput(1);
+        SetBeepOutput((g_mode_day != 0) ? 1 : 0);
         UARTStringPut("*EVT:ALARM\r\n");
     }
 }
@@ -3122,7 +3249,7 @@ void SysTick_Handler(void)
             g_alarm_beep_phase_ms = 0;
             g_alarm_beep_phase ^= 1u;
             g_beep_output_state = g_alarm_beep_phase;
-            SetBeepOutput(g_alarm_beep_phase);
+            SetBeepOutput(((g_mode_day != 0) && (g_alarm_beep_phase != 0)) ? 1 : 0);
         }
     }
 
@@ -3171,6 +3298,15 @@ void SysTick_Handler(void)
         {
             g_msg_auto_show = 0;
             g_display_page = 0;
+            g_display_dirty = 1;
+        }
+    }
+
+    if (g_weather_show_ms != 0)
+    {
+        g_weather_show_ms--;
+        if (g_weather_show_ms == 0)
+        {
             g_display_dirty = 1;
         }
     }

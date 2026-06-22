@@ -36,10 +36,21 @@ class ControlPanel(QWidget):
         self.display_off_button = QPushButton("DISPLAY OFF")
         self.format_left_button = QPushButton("FORMAT LEFT")
         self.format_right_button = QPushButton("FORMAT RIGHT")
+        self.mode_day_button = QPushButton("MODE DAY")
+        self.mode_night_button = QPushButton("MODE NIGHT")
         self.msg_input = QLineEdit()
         self.msg_input.setPlaceholderText("消息文本")
         self.msg_send_button = QPushButton("发送 MSG")
-        for widget in (self.display_on_button, self.display_off_button, self.format_left_button, self.format_right_button, self.msg_input, self.msg_send_button):
+        for widget in (
+            self.display_on_button,
+            self.display_off_button,
+            self.format_left_button,
+            self.format_right_button,
+            self.mode_day_button,
+            self.mode_night_button,
+            self.msg_input,
+            self.msg_send_button,
+        ):
             format_layout.addWidget(widget)
         layout.addWidget(format_box)
 
@@ -108,6 +119,8 @@ class ControlPanel(QWidget):
         self.display_off_button.clicked.connect(lambda: self._emit("*SET:DISPLAY OFF"))
         self.format_left_button.clicked.connect(lambda: self._emit("*SET:FORMAT LEFT"))
         self.format_right_button.clicked.connect(lambda: self._emit("*SET:FORMAT RIGHT"))
+        self.mode_day_button.clicked.connect(lambda: self._emit("*SET:MODE DAY"))
+        self.mode_night_button.clicked.connect(lambda: self._emit("*SET:MODE NIGHT"))
         self.msg_send_button.clicked.connect(lambda: self._emit(f"*SET:MSG {self.msg_input.text().strip()}"))
         self.set_date_button.clicked.connect(lambda: self._emit(f"*SET:DATE {self.date_input.text().strip()}"))
         self.set_time_button.clicked.connect(lambda: self._emit(f"*SET:TIME {self.time_input.text().strip()}"))
@@ -129,8 +142,11 @@ class ControlPanel(QWidget):
         self.command_requested.emit(CommandRequest(command, followups_on_ok=build_followups(command)))
 
     def refresh_ports(self, port_names: list[str]) -> None:
+        current = self.port_combo.currentText()
         self.port_combo.clear()
         self.port_combo.addItems(port_names)
+        if current in port_names:
+            self.port_combo.setCurrentText(current)
 
     def selected_port(self) -> str:
         return self.port_combo.currentText()
@@ -145,6 +161,8 @@ class ControlPanel(QWidget):
             self.display_off_button,
             self.format_left_button,
             self.format_right_button,
+            self.mode_day_button,
+            self.mode_night_button,
             self.msg_send_button,
             self.set_date_button,
             self.set_time_button,

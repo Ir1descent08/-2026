@@ -1,9 +1,12 @@
 # pc_host/widgets/log_panel.py
 from datetime import datetime
-from PyQt5.QtWidgets import QPushButton, QTextEdit, QVBoxLayout, QWidget
+from PyQt5.QtCore import pyqtSignal
+from PyQt5.QtWidgets import QHBoxLayout, QPushButton, QTextEdit, QVBoxLayout, QWidget
 
 
 class LogPanel(QWidget):
+    export_requested = pyqtSignal()
+
     COLORS = {
         "send": "#1f6feb",
         "reply": "#238636",
@@ -17,10 +20,15 @@ class LogPanel(QWidget):
         self.text_edit = QTextEdit()
         self.text_edit.setReadOnly(True)
         self.clear_button = QPushButton("清空日志")
+        self.export_button = QPushButton("导出日志")
         self.clear_button.clicked.connect(self.clear_entries)
+        self.export_button.clicked.connect(self.export_requested.emit)
         layout = QVBoxLayout(self)
         layout.addWidget(self.text_edit)
-        layout.addWidget(self.clear_button)
+        button_row = QHBoxLayout()
+        button_row.addWidget(self.clear_button)
+        button_row.addWidget(self.export_button)
+        layout.addLayout(button_row)
 
     def append_entry(self, kind: str, text: str) -> None:
         stamp = datetime.now().strftime("%H:%M:%S")

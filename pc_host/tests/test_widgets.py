@@ -9,17 +9,29 @@ from pc_host.widgets.twin_panel import TwinPanel
 
 
 class ControlPanelTests(unittest.TestCase):
-    def test_ping_and_format_buttons_emit_command_requests(self):
+    def test_ping_format_and_mode_buttons_emit_command_requests(self):
         app = QApplication.instance() or QApplication([])
         panel = ControlPanel()
         sent = []
         panel.command_requested.connect(sent.append)
         panel.ping_button.click()
         panel.format_right_button.click()
+        panel.mode_day_button.click()
+        panel.mode_night_button.click()
         self.assertEqual(sent[0].text, "*PING")
         self.assertFalse(sent[0].requires_ready)
         self.assertEqual(sent[1].text, "*SET:FORMAT RIGHT")
         self.assertEqual(sent[1].followups_on_ok, ("*GET:FORMAT",))
+        self.assertEqual(sent[2].text, "*SET:MODE DAY")
+        self.assertEqual(sent[3].text, "*SET:MODE NIGHT")
+
+    def test_refresh_ports_keeps_current_selection(self):
+        app = QApplication.instance() or QApplication([])
+        panel = ControlPanel()
+        panel.refresh_ports(["COM3", "COM4"])
+        panel.port_combo.setCurrentText("COM4")
+        panel.refresh_ports(["COM4", "COM5"])
+        self.assertEqual(panel.selected_port(), "COM4")
 
     def test_virtual_key_and_raw_command_emit_expected_text(self):
         app = QApplication.instance() or QApplication([])
@@ -40,6 +52,7 @@ class WidgetTests(unittest.TestCase):
         widget = StatusBarWidget()
         widget.update_state(state)
         self.assertEqual(widget.port_value.text(), "COM3")
+        self.assertEqual(widget.connection_value.text(), "已连接")
         self.assertEqual(widget.ready_value.text(), "READY")
         self.assertEqual(widget.format_value.text(), "LEFT")
 
@@ -48,6 +61,10 @@ class WidgetTests(unittest.TestCase):
         panel = LogPanel()
         panel.append_entry("send", "*PING")
         panel.append_entry("reply", "*PONG 7")
+        exported = []
+        panel.export_requested.connect(lambda: exported.append(True))
+        panel.export_button.click()
+        self.assertEqual(exported, [True])
         with tempfile.NamedTemporaryFile("r+", delete=False) as handle:
             panel.export_to_file(handle.name)
             handle.seek(0)
@@ -55,14 +72,24 @@ class WidgetTests(unittest.TestCase):
 
 
 class TwinPanelTests(unittest.TestCase):
-    def test_twin_panel_renders_digits_leds_and_last_key(self):
+    def test_twin_panel_renders_digits_leds_decimal_points_and_last_key(self):
         app = QApplication.instance() or QApplication([])
-        state = DeviceState(seg_text="12345678", seg_dp_hex="04", led_hex="AA", mode_value="DAY", last_key_event="USER1")
+        state = DeviceState(seg_text="12345678", seg_dp_hex="04", led_hex="AA", mode_value="DAY", last_key_event="USER1", ready=True)
         panel = TwinPanel()
         panel.update_state(state)
         self.assertEqual(panel.digit_labels[0].text(), "1")
+        self.assertEqual(panel.digit_labels[2].text(), "3.")
         self.assertEqual(panel.mode_value.text(), "DAY")
-        self.assertEqual(panel.key_labels["USER1"].text(), "USER1 *")
+        self.assertEqual(panel.key_buttons["USER1"].text(), "USER1 *")
+        self.assertTrue(panel.key_buttons["USER1"].isEnabled())
+
+    def test_twin_panel_key_click_emits_request(self):
+        app = QApplication.instance() or QApplication([])
+        panel = TwinPanel()
+        requested = []
+        panel.key_requested.connect(requested.append)
+        panel.key_buttons["USER2"].click()
+        self.assertEqual(requested, ["USER2"])
 
 
 if __name__ == "__main__":

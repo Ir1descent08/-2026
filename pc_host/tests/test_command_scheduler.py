@@ -43,6 +43,21 @@ class CommandSchedulerTests(unittest.TestCase):
         self.assertEqual(sent[1], "*GET:DISPLAY")
         self.assertTrue(scheduler.ready)
 
+    def test_ready_scheduler_sends_periodic_ping(self):
+        sent = []
+        clock = FakeClock()
+        scheduler = CommandScheduler(sent.append, clock)
+        scheduler.on_port_opened()
+        clock.advance(10_000)
+        scheduler.tick()
+        clock.advance(120)
+        scheduler.handle_reply(parse_line("*PONG 9"))
+        scheduler._queue.clear()
+        clock.advance(1000)
+        scheduler.tick()
+        self.assertEqual(sent[-1], "*PING")
+        self.assertEqual(scheduler.current_request_text(), "*PING")
+
     def test_followups_wait_for_ok(self):
         sent = []
         clock = FakeClock()

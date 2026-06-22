@@ -1,7 +1,6 @@
 # pc_host/services/chart_service.py
 import csv
 from datetime import datetime
-import matplotlib.pyplot as plt
 
 
 def append_history_row(path: str, event_name: str, value: str) -> None:
@@ -11,6 +10,8 @@ def append_history_row(path: str, event_name: str, value: str) -> None:
 
 
 def build_history_figure(csv_path: str):
+    import matplotlib.pyplot as plt
+
     counts = {}
     with open(csv_path, "r", encoding="utf-8") as handle:
         for row in csv.reader(handle):
