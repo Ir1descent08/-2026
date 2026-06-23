@@ -20,7 +20,6 @@ class DeviceStateTests(unittest.TestCase):
         self.assertEqual(state.format_value, "LEFT")
         self.assertEqual(state.display_enabled, "ON")
         self.assertEqual(state.alarm_value, "OFF")
-        self.assertEqual(state.edit_mode, 0)
 
     def test_apply_display_event_splits_text_and_dp_mask(self):
         state = DeviceState()
@@ -28,16 +27,11 @@ class DeviceStateTests(unittest.TestCase):
         self.assertEqual(state.seg_text, "12345678")
         self.assertEqual(state.seg_dp_hex, "04")
 
-    def test_virtual_key_shadow_tracks_edit_mode_and_field(self):
+    def test_key_event_only_updates_last_key(self):
         state = DeviceState()
-        state.apply_shadow_from_command("*SET:KEY FUNC")
-        self.assertEqual(state.edit_mode, 1)
-        self.assertEqual(state.edit_field, 0)
-        state.apply_shadow_from_command("*SET:KEY SHIFT")
-        self.assertEqual(state.edit_field, 1)
-        state.apply_shadow_from_command("*SET:KEY SAVE")
-        self.assertEqual(state.edit_mode, 0)
-        self.assertTrue(state.blink_visible)
+        state.apply_event("KEY", "FUNC")
+        self.assertEqual(state.last_key_event, "FUNC")
+        self.assertEqual(state.seg_text, "        ")
 
 
 if __name__ == "__main__":

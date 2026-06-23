@@ -103,14 +103,6 @@ class TwinPanelTests(unittest.TestCase):
         self.assertEqual(panel.key_layout.itemAtPosition(1, 0).widget().text(), "USER1")
         self.assertEqual(panel.key_layout.itemAtPosition(1, 4).widget().text(), "SAVE")
 
-    def test_twin_panel_hides_edit_field_when_blink_is_off(self):
-        app = QApplication.instance() or QApplication([])
-        state = DeviceState(seg_text="12345678", seg_dp_hex="00", format_value="LEFT", edit_mode=1, edit_field=1, blink_visible=False)
-        panel = TwinPanel()
-        panel.update_state(state)
-        self.assertEqual(panel.digit_labels[2].text(), " ")
-        self.assertEqual(panel.digit_labels[3].text(), " ")
-
     def test_twin_panel_key_click_emits_request(self):
         app = QApplication.instance() or QApplication([])
         panel = TwinPanel()

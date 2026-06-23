@@ -68,9 +68,6 @@ class MainWindow(QMainWindow):
         self.auto_mode_timer = QTimer(self)
         self.auto_mode_timer.timeout.connect(self.poll_auto_mode)
         self.auto_mode_timer.start(60_000)
-        self.edit_blink_timer = QTimer(self)
-        self.edit_blink_timer.timeout.connect(self._tick_edit_blink)
-        self.edit_blink_timer.start(500)
         self.refresh_ports()
         self.refresh_ui()
 
@@ -162,15 +159,6 @@ class MainWindow(QMainWindow):
                 self.run_ntp_sync()
         else:
             self.log_panel.append_entry("error", f"unknown line: {line}")
-        self.refresh_ui()
-
-    def _tick_edit_blink(self) -> None:
-        if self.state.edit_mode == 0:
-            if not self.state.blink_visible:
-                self.state.blink_visible = True
-                self.refresh_ui()
-            return
-        self.state.blink_visible = not self.state.blink_visible
         self.refresh_ui()
 
     def refresh_ui(self) -> None:

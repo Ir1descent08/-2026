@@ -136,11 +136,6 @@ class TwinPanel(QWidget):
         self.mode_value.setText(state.mode_value)
         dot_mask = int(state.seg_dp_hex, 16)
         chars = list(state.seg_text[:8].ljust(8))
-        if state.edit_mode != 0 and not state.blink_visible:
-            position = 6 - state.edit_field * 2 if state.format_value == "RIGHT" else state.edit_field * 2
-            if 0 <= position < 7:
-                chars[position] = " "
-                chars[position + 1] = " "
         for index, char in enumerate(chars):
             self.digit_widgets[index].set_character(" " if char == "_" else char, bool(dot_mask & (1 << index)))
         led_value = int(state.led_hex, 16)
