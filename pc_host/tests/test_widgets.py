@@ -45,6 +45,15 @@ class ControlPanelTests(unittest.TestCase):
         self.assertEqual(sent[0].text, "*SET:KEY USER1")
         self.assertEqual(sent[1].text, "*PING")
 
+    def test_virtual_key_layout_matches_board_order(self):
+        app = QApplication.instance() or QApplication([])
+        panel = ControlPanel()
+        self.assertEqual(panel.key_buttons["USER2"].text(), "USER2")
+        self.assertEqual(panel.layout().itemAt(3).widget().layout().itemAtPosition(0, 0).widget().text(), "USER2")
+        self.assertEqual(panel.layout().itemAt(3).widget().layout().itemAtPosition(0, 4).widget().text(), "DISP")
+        self.assertEqual(panel.layout().itemAt(3).widget().layout().itemAtPosition(1, 0).widget().text(), "USER1")
+        self.assertEqual(panel.layout().itemAt(3).widget().layout().itemAtPosition(1, 4).widget().text(), "SAVE")
+
 
 class WidgetTests(unittest.TestCase):
     def test_status_bar_renders_state_text(self):
@@ -75,14 +84,32 @@ class WidgetTests(unittest.TestCase):
 class TwinPanelTests(unittest.TestCase):
     def test_twin_panel_renders_digits_leds_decimal_points_and_last_key(self):
         app = QApplication.instance() or QApplication([])
-        state = DeviceState(seg_text="12345678", seg_dp_hex="04", led_hex="AA", mode_value="DAY", last_key_event="USER1", ready=True)
+        state = DeviceState(seg_text="12345678", seg_dp_hex="04", led_hex="01", mode_value="DAY", last_key_event="USER1", ready=True)
         panel = TwinPanel()
         panel.update_state(state)
         self.assertEqual(panel.digit_labels[0].text(), "1")
         self.assertEqual(panel.digit_labels[2].text(), "3.")
         self.assertEqual(panel.mode_value.text(), "DAY")
+        self.assertEqual(panel.led_labels[0].text(), "●")
+        self.assertEqual(panel.led_labels[7].text(), "○")
         self.assertEqual(panel.key_buttons["USER1"].text(), "USER1 *")
         self.assertTrue(panel.key_buttons["USER1"].isEnabled())
+
+    def test_twin_panel_key_layout_matches_board_order(self):
+        app = QApplication.instance() or QApplication([])
+        panel = TwinPanel()
+        self.assertEqual(panel.key_layout.itemAtPosition(0, 0).widget().text(), "USER2")
+        self.assertEqual(panel.key_layout.itemAtPosition(0, 4).widget().text(), "DISP")
+        self.assertEqual(panel.key_layout.itemAtPosition(1, 0).widget().text(), "USER1")
+        self.assertEqual(panel.key_layout.itemAtPosition(1, 4).widget().text(), "SAVE")
+
+    def test_twin_panel_hides_edit_field_when_blink_is_off(self):
+        app = QApplication.instance() or QApplication([])
+        state = DeviceState(seg_text="12345678", seg_dp_hex="00", format_value="LEFT", edit_mode=1, edit_field=1, blink_visible=False)
+        panel = TwinPanel()
+        panel.update_state(state)
+        self.assertEqual(panel.digit_labels[2].text(), " ")
+        self.assertEqual(panel.digit_labels[3].text(), " ")
 
     def test_twin_panel_key_click_emits_request(self):
         app = QApplication.instance() or QApplication([])

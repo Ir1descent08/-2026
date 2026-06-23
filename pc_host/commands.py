@@ -8,6 +8,10 @@ VALID_KEY_NAMES = (
     "FUNC", "SHIFT", "ADD", "SAVE", "DISP",
     "SPEED", "FORMAT", "EXT", "USER1", "USER2",
 )
+KEY_LAYOUT_ROWS = (
+    ("USER2", "EXT", "FORMAT", "SPEED", "DISP"),
+    ("USER1", "FUNC", "SHIFT", "ADD", "SAVE"),
+)
 DEMO_PRESETS = (
     ("DATE YEAR", "*SET:DATE YEAR 2026"),
     ("DATE MONTH", "*SET:DATE MONTH 06"),

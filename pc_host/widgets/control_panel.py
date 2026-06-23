@@ -1,7 +1,7 @@
 # pc_host/widgets/control_panel.py
 from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtWidgets import QComboBox, QFormLayout, QGridLayout, QGroupBox, QHBoxLayout, QLineEdit, QPushButton, QVBoxLayout, QWidget
-from pc_host.commands import CommandRequest, DEMO_PRESETS, VALID_KEY_NAMES, build_followups
+from pc_host.commands import CommandRequest, DEMO_PRESETS, KEY_LAYOUT_ROWS, build_followups
 
 
 class ControlPanel(QWidget):
@@ -79,11 +79,12 @@ class ControlPanel(QWidget):
         key_box = QGroupBox("虚拟按键")
         key_layout = QGridLayout(key_box)
         self.key_buttons = {}
-        for index, name in enumerate(VALID_KEY_NAMES):
-            button = QPushButton(name)
-            self.key_buttons[name] = button
-            key_layout.addWidget(button, index // 5, index % 5)
-            button.clicked.connect(lambda _checked=False, key=name: self._emit(f"*SET:KEY {key}"))
+        for row_index, row in enumerate(KEY_LAYOUT_ROWS):
+            for column_index, name in enumerate(row):
+                button = QPushButton(name)
+                self.key_buttons[name] = button
+                key_layout.addWidget(button, row_index, column_index)
+                button.clicked.connect(lambda _checked=False, key=name: self._emit(f"*SET:KEY {key}"))
         layout.addWidget(key_box)
 
         demo_box = QGroupBox("协议演示")
