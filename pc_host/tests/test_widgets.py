@@ -45,6 +45,31 @@ class ControlPanelTests(unittest.TestCase):
         self.assertEqual(sent[0].text, "*SET:KEY USER1")
         self.assertEqual(sent[1].text, "*PING")
 
+    def test_demo_and_query_buttons_emit_expected_commands(self):
+        app = QApplication.instance() or QApplication([])
+        panel = ControlPanel()
+        sent = []
+        panel.command_requested.connect(sent.append)
+        panel.abbrev_demo_button.click()
+        panel.mixed_case_demo_button.click()
+        panel.get_display_button.click()
+        panel.get_format_button.click()
+        panel.get_date_button.click()
+        panel.get_time_button.click()
+        panel.get_alarm_button.click()
+        self.assertEqual(
+            [request.text for request in sent],
+            [
+                "*GET:DISP",
+                "*gEt:FoRmAt",
+                "*GET:DISPLAY",
+                "*GET:FORMAT",
+                "*GET:DATE",
+                "*GET:TIME",
+                "*GET:ALARM",
+            ],
+        )
+
     def test_virtual_key_layout_matches_board_order(self):
         app = QApplication.instance() or QApplication([])
         panel = ControlPanel()
@@ -75,10 +100,13 @@ class WidgetTests(unittest.TestCase):
         panel.export_requested.connect(lambda: exported.append(True))
         panel.export_button.click()
         self.assertEqual(exported, [True])
+        plain_text = panel.text_edit.toPlainText()
+        self.assertIn("[TX] *PING", plain_text)
+        self.assertIn("[RX] *PONG 7", plain_text)
         with tempfile.NamedTemporaryFile("r+", delete=False) as handle:
             panel.export_to_file(handle.name)
             handle.seek(0)
-            self.assertIn("*PING", handle.read())
+            self.assertIn("[TX] *PING", handle.read())
 
 
 class TwinPanelTests(unittest.TestCase):

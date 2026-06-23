@@ -14,6 +14,13 @@ class LogPanel(QWidget):
         "error": "#d1242f",
         "warn": "#9a6700",
     }
+    PREFIXES = {
+        "send": "TX",
+        "reply": "RX",
+        "event": "EVT",
+        "error": "ERR",
+        "warn": "WARN",
+    }
 
     def __init__(self) -> None:
         super().__init__()
@@ -33,7 +40,8 @@ class LogPanel(QWidget):
     def append_entry(self, kind: str, text: str) -> None:
         stamp = datetime.now().strftime("%H:%M:%S")
         color = self.COLORS.get(kind, "#57606a")
-        self.text_edit.append(f'<span style="color:{color}">[{stamp}] {text}</span>')
+        prefix = self.PREFIXES.get(kind, "LOG")
+        self.text_edit.append(f'<span style="color:{color}">[{stamp}] [{prefix}] {text}</span>')
 
     def clear_entries(self) -> None:
         self.text_edit.clear()

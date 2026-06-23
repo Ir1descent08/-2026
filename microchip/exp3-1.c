@@ -26,7 +26,6 @@
 #define KEY_SCAN_PERIOD_MS          10
 #define KEY_DEBOUNCE_TICKS          2
 #define SCROLL_SLOW_MS              600
-#define SCROLL_MEDIUM_MS            300
 #define SCROLL_FAST_MS              150
 #define BOOT_ON_MS                  1500
 #define BOOT_OFF_MS                 1000
@@ -148,6 +147,7 @@ static void SampleBoardKeys(void);
 static void QueueKeyEvent(uint8_t event_code);
 static void EmitKeyEvent(const char *name);
 static void ApplyVirtualKey(const char *name);
+static bool IsValidKeyName(const char *name);
 static bool MatchToken(const char *token, const char *pattern);
 static bool ParseUnsigned(const char *token, uint32_t *value);
 static bool ParseHexByte(const char *token, uint8_t *value);
@@ -1550,7 +1550,7 @@ static void HandleSetKey(char *tokens[], uint8_t count)
     }
 
     length = strlen(tokens[0]);
-    if ((length == 0) || (length > KEY_NAME_MAX_LEN))
+    if ((length == 0) || (length > KEY_NAME_MAX_LEN) || !IsValidKeyName(tokens[0]))
     {
         UARTReplyError("PARAM");
         return;
@@ -2571,10 +2571,6 @@ static void ApplyVirtualKey(const char *name)
     {
         if (g_scroll_speed_ms == SCROLL_SLOW_MS)
         {
-            g_scroll_speed_ms = SCROLL_MEDIUM_MS;
-        }
-        else if (g_scroll_speed_ms == SCROLL_MEDIUM_MS)
-        {
             g_scroll_speed_ms = SCROLL_FAST_MS;
         }
         else
@@ -2609,6 +2605,14 @@ static void ApplyVirtualKey(const char *name)
         }
         return;
     }
+}
+
+static bool IsValidKeyName(const char *name)
+{
+    return MatchToken(name, "FUNC") || MatchToken(name, "SHIFT") || MatchToken(name, "ADD") ||
+           MatchToken(name, "SAVE") || MatchToken(name, "DISP") || MatchToken(name, "SPEED") ||
+           MatchToken(name, "FORMAT") || MatchToken(name, "EXT") || MatchToken(name, "USER1") ||
+           MatchToken(name, "USER2");
 }
 
 static bool MatchToken(const char *token, const char *pattern)

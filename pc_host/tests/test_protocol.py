@@ -1,5 +1,6 @@
+from pathlib import Path
 import unittest
-from pc_host.commands import VALID_KEY_NAMES, build_followups, initial_sync_requests
+from pc_host.commands import ABBREV_DEMO_COMMAND, MIXED_CASE_DEMO_COMMAND, VALID_KEY_NAMES, build_followups, initial_sync_requests
 from pc_host.device_state import DeviceState
 from pc_host.protocol import parse_line
 
@@ -33,6 +34,10 @@ class CommandRulesTests(unittest.TestCase):
         self.assertEqual(len(VALID_KEY_NAMES), 10)
         self.assertIn("USER2", VALID_KEY_NAMES)
 
+    def test_demo_command_constants_match_ui_expectations(self):
+        self.assertEqual(ABBREV_DEMO_COMMAND, "*GET:DISP")
+        self.assertEqual(MIXED_CASE_DEMO_COMMAND, "*gEt:FoRmAt")
+
     def test_followups_cover_stateful_commands(self):
         self.assertEqual(build_followups("*SET:FORMAT RIGHT"), ("*GET:FORMAT",))
         self.assertEqual(build_followups("*SET:DISPLAY OFF"), ("*GET:DISPLAY",))
@@ -40,6 +45,12 @@ class CommandRulesTests(unittest.TestCase):
             [item.text for item in initial_sync_requests()],
             ["*GET:DISPLAY", "*GET:FORMAT", "*GET:DATE", "*GET:TIME", "*GET:ALARM"],
         )
+
+    def test_invalid_set_key_is_rejected_in_mcu_source(self):
+        source = Path(__file__).resolve().parents[2] / "microchip" / "exp3-1.c"
+        text = source.read_text(encoding="utf-8")
+        self.assertIn("!IsValidKeyName(tokens[0])", text)
+        self.assertIn('UARTReplyError("PARAM")', text)
 
 
 if __name__ == "__main__":

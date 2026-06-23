@@ -1,7 +1,7 @@
 # pc_host/widgets/control_panel.py
 from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtWidgets import QComboBox, QFormLayout, QGridLayout, QGroupBox, QHBoxLayout, QLineEdit, QPushButton, QVBoxLayout, QWidget
-from pc_host.commands import CommandRequest, DEMO_PRESETS, KEY_LAYOUT_ROWS, build_followups
+from pc_host.commands import ABBREV_DEMO_COMMAND, CommandRequest, DEMO_PRESETS, KEY_LAYOUT_ROWS, MIXED_CASE_DEMO_COMMAND, build_followups
 
 
 class ControlPanel(QWidget):
@@ -93,9 +93,30 @@ class ControlPanel(QWidget):
         for label, command in DEMO_PRESETS:
             self.demo_combo.addItem(label, command)
         self.demo_send_button = QPushButton("发送演示命令")
+        self.abbrev_demo_button = QPushButton("缩写演示")
+        self.mixed_case_demo_button = QPushButton("大小写混合演示")
         demo_layout.addWidget(self.demo_combo)
         demo_layout.addWidget(self.demo_send_button)
+        demo_layout.addWidget(self.abbrev_demo_button)
+        demo_layout.addWidget(self.mixed_case_demo_button)
         layout.addWidget(demo_box)
+
+        query_box = QGroupBox("状态查询")
+        query_layout = QHBoxLayout(query_box)
+        self.get_display_button = QPushButton("GET DISPLAY")
+        self.get_format_button = QPushButton("GET FORMAT")
+        self.get_date_button = QPushButton("GET DATE")
+        self.get_time_button = QPushButton("GET TIME")
+        self.get_alarm_button = QPushButton("GET ALARM")
+        for widget in (
+            self.get_display_button,
+            self.get_format_button,
+            self.get_date_button,
+            self.get_time_button,
+            self.get_alarm_button,
+        ):
+            query_layout.addWidget(widget)
+        layout.addWidget(query_box)
 
         extension_box = QGroupBox("扩展功能")
         extension_layout = QHBoxLayout(extension_box)
@@ -131,6 +152,13 @@ class ControlPanel(QWidget):
         self.set_led_button.clicked.connect(lambda: self._emit(f"*SET:LED {self.led_input.text().strip()}"))
         self.set_beep_button.clicked.connect(lambda: self._emit(f"*SET:BEEP {self.beep_input.text().strip()}"))
         self.demo_send_button.clicked.connect(lambda: self._emit(self.demo_combo.currentData()))
+        self.abbrev_demo_button.clicked.connect(lambda: self.command_requested.emit(CommandRequest(ABBREV_DEMO_COMMAND)))
+        self.mixed_case_demo_button.clicked.connect(lambda: self.command_requested.emit(CommandRequest(MIXED_CASE_DEMO_COMMAND)))
+        self.get_display_button.clicked.connect(lambda: self._emit("*GET:DISPLAY"))
+        self.get_format_button.clicked.connect(lambda: self._emit("*GET:FORMAT"))
+        self.get_date_button.clicked.connect(lambda: self._emit("*GET:DATE"))
+        self.get_time_button.clicked.connect(lambda: self._emit("*GET:TIME"))
+        self.get_alarm_button.clicked.connect(lambda: self._emit("*GET:ALARM"))
         self.connect_button.clicked.connect(lambda: self.connect_requested.emit(self.selected_port()))
         self.disconnect_button.clicked.connect(self.disconnect_requested.emit)
         self.refresh_button.clicked.connect(self.refresh_requested.emit)
@@ -200,6 +228,13 @@ class ControlPanel(QWidget):
             self.set_beep_button,
             self.reset_button,
             self.demo_send_button,
+            self.abbrev_demo_button,
+            self.mixed_case_demo_button,
+            self.get_display_button,
+            self.get_format_button,
+            self.get_date_button,
+            self.get_time_button,
+            self.get_alarm_button,
         ):
             button.setEnabled(ready)
         for button in self.key_buttons.values():
