@@ -1,13 +1,16 @@
 # pc_host/services/ntp_service.py
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import ntplib
 from pc_host.commands import CommandRequest, build_followups
+
+
+CHINA_TIMEZONE = timezone(timedelta(hours=8))
 
 
 def fetch_ntp_datetime(client=None, host: str = "pool.ntp.org") -> datetime:
     active_client = client or ntplib.NTPClient()
     response = active_client.request(host, version=3)
-    return datetime.fromtimestamp(response.tx_time, tz=timezone.utc)
+    return datetime.fromtimestamp(response.tx_time, tz=timezone.utc).astimezone(CHINA_TIMEZONE)
 
 
 def build_sync_requests(moment: datetime) -> list[CommandRequest]:

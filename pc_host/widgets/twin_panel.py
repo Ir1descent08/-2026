@@ -1,6 +1,6 @@
 from PyQt5.QtCore import QSize, Qt, QRectF, pyqtSignal
 from PyQt5.QtGui import QColor, QPainter
-from PyQt5.QtWidgets import QGridLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PyQt5.QtWidgets import QFrame, QGridLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 from pc_host.commands import KEY_LAYOUT_ROWS
 
 
@@ -33,6 +33,7 @@ class SevenSegmentDigit(QWidget):
         "S": "acdfg",
         "T": "defg",
         "U": "bcdef",
+        "W": "bcdef",
         "Y": "bcdfg",
         "-": "g",
         "_": "d",
@@ -124,21 +125,41 @@ class TwinPanel(QWidget):
 
         self.key_layout = QGridLayout()
         self.key_buttons = {}
+        separator = QFrame()
+        separator.setFrameShape(QFrame.VLine)
+        separator.setFrameShadow(QFrame.Sunken)
+        self.key_layout.addWidget(separator, 0, 1, 2, 1)
         for row_index, row in enumerate(KEY_LAYOUT_ROWS):
             for column_index, name in enumerate(row):
                 button = QPushButton(name)
                 self.key_buttons[name] = button
                 button.clicked.connect(lambda _checked=False, key=name: self.key_requested.emit(key))
-                self.key_layout.addWidget(button, row_index, column_index)
+                target_column = column_index + 1 if column_index > 0 else column_index
+                self.key_layout.addWidget(button, row_index, target_column)
         layout.addLayout(self.key_layout)
 
     def update_state(self, state) -> None:
         self.mode_value.setText(state.mode_value)
         dot_mask = int(state.seg_dp_hex, 16)
         chars = list(state.seg_text[:8].ljust(8))
+        if state.edit_mode != 0:
+            blink_on = ((state.ui_now_ms // 500) % 2) == 0
+            if blink_on:
+                if state.format_value == "RIGHT":
+                    start = 6 - state.edit_field * 2
+                else:
+                    start = state.edit_field * 2
+                if 0 <= start <= 6:
+                    chars[start] = " "
+                    chars[start + 1] = " "
         for index, char in enumerate(chars):
             self.digit_widgets[index].set_character(" " if char == "_" else char, bool(dot_mask & (1 << index)))
         led_value = int(state.led_hex, 16)
+        heartbeat_bit = 0x01 if ((state.ui_now_ms // 500) % 2) == 0 else 0x00
+        if state.mode_value == "NIGHT":
+            led_value = heartbeat_bit
+        else:
+            led_value = (led_value & 0xFE) | heartbeat_bit
         for index, label in enumerate(self.led_labels):
             label.setText("●" if ((led_value >> index) & 0x01) else "○")
         for name, button in self.key_buttons.items():

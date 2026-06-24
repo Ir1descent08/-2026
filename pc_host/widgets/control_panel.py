@@ -1,6 +1,6 @@
 # pc_host/widgets/control_panel.py
 from PyQt5.QtCore import pyqtSignal
-from PyQt5.QtWidgets import QComboBox, QFormLayout, QGridLayout, QGroupBox, QHBoxLayout, QLineEdit, QPushButton, QVBoxLayout, QWidget
+from PyQt5.QtWidgets import QComboBox, QFormLayout, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QLineEdit, QPushButton, QVBoxLayout, QWidget
 from pc_host.commands import ABBREV_DEMO_COMMAND, CommandRequest, DEMO_PRESETS, KEY_LAYOUT_ROWS, MIXED_CASE_DEMO_COMMAND, build_followups
 
 
@@ -78,12 +78,17 @@ class ControlPanel(QWidget):
 
         key_box = QGroupBox("虚拟按键")
         key_layout = QGridLayout(key_box)
+        separator = QFrame()
+        separator.setFrameShape(QFrame.VLine)
+        separator.setFrameShadow(QFrame.Sunken)
+        key_layout.addWidget(separator, 0, 1, 2, 1)
         self.key_buttons = {}
         for row_index, row in enumerate(KEY_LAYOUT_ROWS):
             for column_index, name in enumerate(row):
                 button = QPushButton(name)
                 self.key_buttons[name] = button
-                key_layout.addWidget(button, row_index, column_index)
+                target_column = column_index + 1 if column_index > 0 else column_index
+                key_layout.addWidget(button, row_index, target_column)
                 button.clicked.connect(lambda _checked=False, key=name: self._emit(f"*SET:KEY {key}"))
         layout.addWidget(key_box)
 

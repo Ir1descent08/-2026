@@ -2,6 +2,9 @@
 from dataclasses import dataclass
 
 
+EDIT_TIMEOUT_MS = 5000
+
+
 @dataclass
 class DeviceState:
     port_name: str = ""
@@ -21,6 +24,10 @@ class DeviceState:
     last_status: str = ""
     last_uptime_s: int = 0
     last_rtt_ms: int = 0
+    ui_now_ms: int = 0
+    edit_mode: int = 0
+    edit_field: int = 0
+    edit_deadline_ms: int = 0
 
     def apply_query_result(self, query_name: str, payload: str) -> None:
         if query_name == "DISPLAY":
@@ -64,3 +71,31 @@ class DeviceState:
             self.led_hex = payload[-2:]
         elif event_name == "MODE":
             self.mode_value = payload
+
+    def apply_key_shadow(self, key_name: str, now_ms: int) -> None:
+        self.last_key_event = key_name
+        if key_name == "FUNC":
+            if self.edit_mode == 0:
+                self.edit_mode = 1
+            else:
+                self.edit_mode += 1
+                if self.edit_mode > 3:
+                    self.edit_mode = 0
+            self.edit_field = 0
+        elif (key_name == "SHIFT") and (self.edit_mode != 0):
+            self.edit_field = (self.edit_field + 1) % 3
+        elif (key_name == "SAVE") and (self.edit_mode != 0):
+            self.edit_mode = 0
+            self.edit_field = 0
+
+        if (key_name in ("FUNC", "SHIFT", "ADD")) and (self.edit_mode != 0):
+            self.edit_deadline_ms = now_ms + EDIT_TIMEOUT_MS
+        elif self.edit_mode == 0:
+            self.edit_deadline_ms = 0
+
+    def expire_transient_state(self, now_ms: int) -> None:
+        self.ui_now_ms = now_ms
+        if (self.edit_mode != 0) and (self.edit_deadline_ms != 0) and (now_ms >= self.edit_deadline_ms):
+            self.edit_mode = 0
+            self.edit_field = 0
+            self.edit_deadline_ms = 0

@@ -33,6 +33,25 @@ class DeviceStateTests(unittest.TestCase):
         self.assertEqual(state.last_key_event, "FUNC")
         self.assertEqual(state.seg_text, "        ")
 
+    def test_apply_key_shadow_tracks_edit_state_and_timeout(self):
+        state = DeviceState()
+        state.apply_key_shadow("FUNC", 1000)
+        self.assertEqual(state.edit_mode, 1)
+        self.assertEqual(state.edit_field, 0)
+        state.apply_key_shadow("SHIFT", 1200)
+        self.assertEqual(state.edit_field, 1)
+        state.expire_transient_state(7000)
+        self.assertEqual(state.edit_mode, 0)
+        self.assertEqual(state.edit_field, 0)
+        self.assertEqual(state.ui_now_ms, 7000)
+
+    def test_save_key_exits_edit_state(self):
+        state = DeviceState(edit_mode=2, edit_field=1, edit_deadline_ms=9000)
+        state.apply_key_shadow("SAVE", 2000)
+        self.assertEqual(state.edit_mode, 0)
+        self.assertEqual(state.edit_field, 0)
+        self.assertEqual(state.edit_deadline_ms, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

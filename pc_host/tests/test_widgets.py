@@ -75,9 +75,10 @@ class ControlPanelTests(unittest.TestCase):
         panel = ControlPanel()
         self.assertEqual(panel.key_buttons["USER2"].text(), "USER2")
         self.assertEqual(panel.layout().itemAt(3).widget().layout().itemAtPosition(0, 0).widget().text(), "USER2")
-        self.assertEqual(panel.layout().itemAt(3).widget().layout().itemAtPosition(0, 4).widget().text(), "DISP")
+        self.assertEqual(panel.layout().itemAt(3).widget().layout().itemAtPosition(0, 5).widget().text(), "DISP")
         self.assertEqual(panel.layout().itemAt(3).widget().layout().itemAtPosition(1, 0).widget().text(), "USER1")
-        self.assertEqual(panel.layout().itemAt(3).widget().layout().itemAtPosition(1, 4).widget().text(), "SAVE")
+        self.assertEqual(panel.layout().itemAt(3).widget().layout().itemAtPosition(1, 5).widget().text(), "SAVE")
+        self.assertIsNotNone(panel.layout().itemAt(3).widget().layout().itemAtPosition(0, 1).widget())
 
 
 class WidgetTests(unittest.TestCase):
@@ -124,13 +125,23 @@ class TwinPanelTests(unittest.TestCase):
         self.assertEqual(panel.key_buttons["USER1"].text(), "USER1 *")
         self.assertTrue(panel.key_buttons["USER1"].isEnabled())
 
+    def test_twin_panel_supports_w_and_edit_blink(self):
+        app = QApplication.instance() or QApplication([])
+        state = DeviceState(seg_text="WTH 2500", seg_dp_hex="00", led_hex="00", mode_value="DAY", format_value="LEFT", edit_mode=1, edit_field=0, ui_now_ms=0, ready=True)
+        panel = TwinPanel()
+        panel.update_state(state)
+        self.assertEqual(panel.digit_labels[2].text(), "H")
+        self.assertEqual(panel.digit_labels[0].text(), " ")
+        self.assertEqual(panel.digit_labels[1].text(), " ")
+
     def test_twin_panel_key_layout_matches_board_order(self):
         app = QApplication.instance() or QApplication([])
         panel = TwinPanel()
         self.assertEqual(panel.key_layout.itemAtPosition(0, 0).widget().text(), "USER2")
-        self.assertEqual(panel.key_layout.itemAtPosition(0, 4).widget().text(), "DISP")
+        self.assertEqual(panel.key_layout.itemAtPosition(0, 5).widget().text(), "DISP")
         self.assertEqual(panel.key_layout.itemAtPosition(1, 0).widget().text(), "USER1")
-        self.assertEqual(panel.key_layout.itemAtPosition(1, 4).widget().text(), "SAVE")
+        self.assertEqual(panel.key_layout.itemAtPosition(1, 5).widget().text(), "SAVE")
+        self.assertIsNotNone(panel.key_layout.itemAtPosition(0, 1).widget())
 
     def test_twin_panel_key_click_emits_request(self):
         app = QApplication.instance() or QApplication([])

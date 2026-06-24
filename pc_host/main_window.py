@@ -132,6 +132,7 @@ class MainWindow(QMainWindow):
             return
         for line in lines:
             self.process_incoming_line(line)
+        self.refresh_ui()
 
     def process_incoming_line(self, line: str) -> None:
         from pc_host.services.chart_service import append_history_row
@@ -156,6 +157,8 @@ class MainWindow(QMainWindow):
             self.log_panel.append_entry("error", line)
         elif message.kind == "event":
             self.state.apply_event(message.event_name, message.payload)
+            if message.event_name == "KEY":
+                self.state.apply_key_shadow(message.payload, self._now_ms())
             self.log_panel.append_entry("event", line)
             if message.event_name in ("MODE", "KEY", "ALARM", "ALARM_OFF"):
                 append_history_row(str(self.history_csv), message.event_name.lower(), message.payload)
@@ -166,6 +169,7 @@ class MainWindow(QMainWindow):
         self.refresh_ui()
 
     def refresh_ui(self) -> None:
+        self.state.expire_transient_state(self._now_ms())
         self.control_panel.set_connected(self.state.connected)
         self.control_panel.set_ready_enabled(self.state.ready)
         self.status_bar.update_state(self.state)

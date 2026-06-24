@@ -1,7 +1,7 @@
 import csv
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from astral import Observer
 from pc_host.services.chart_service import append_history_row, build_history_figure
 from pc_host.services.daynight_service import compute_mode
@@ -21,8 +21,13 @@ class FakeNtpClient:
 class ServiceTests(unittest.TestCase):
     def test_fetch_ntp_datetime_uses_client_response(self):
         moment = fetch_ntp_datetime(FakeNtpClient())
-        self.assertEqual(moment.tzinfo, timezone.utc)
+        self.assertEqual(moment.utcoffset(), timezone(timedelta(hours=8)).utcoffset(None))
         self.assertEqual(moment.year, 2024)
+        self.assertEqual(moment.month, 6)
+        self.assertEqual(moment.day, 18)
+        self.assertEqual(moment.hour, 16)
+        self.assertEqual(moment.minute, 40)
+        self.assertEqual(moment.second, 0)
 
     def test_build_sync_requests_returns_date_then_time(self):
         requests = build_sync_requests(datetime(2026, 6, 18, 12, 34, 56, tzinfo=timezone.utc))

@@ -102,6 +102,17 @@ class MainWindowFlowTests(unittest.TestCase):
             window.process_incoming_line("*EVT:KEY USER1")
         run_ntp_sync.assert_called_once_with()
 
+    def test_func_and_shift_events_drive_edit_shadow(self):
+        app = QApplication.instance() or QApplication([])
+        serial_manager = FakeSerialManager()
+        now_ms = {"value": 1000}
+        window = MainWindow(serial_manager=serial_manager, now_ms=lambda: now_ms["value"])
+        window.process_incoming_line("*EVT:KEY FUNC")
+        self.assertEqual(window.state.edit_mode, 1)
+        now_ms["value"] = 1200
+        window.process_incoming_line("*EVT:KEY SHIFT")
+        self.assertEqual(window.state.edit_field, 1)
+
     def test_event_history_persists_key_mode_and_alarm_events(self):
         app = QApplication.instance() or QApplication([])
         serial_manager = FakeSerialManager()
@@ -141,6 +152,16 @@ class MainWindowFlowTests(unittest.TestCase):
         }):
             window.run_weather_fetch()
         self.assertEqual(window.scheduler._queue[-1].text, "*SET:WEATHER 0 0")
+
+    def test_refresh_ui_expires_edit_shadow(self):
+        app = QApplication.instance() or QApplication([])
+        serial_manager = FakeSerialManager()
+        now_ms = {"value": 1000}
+        window = MainWindow(serial_manager=serial_manager, now_ms=lambda: now_ms["value"])
+        window.state.apply_key_shadow("FUNC", 1000)
+        now_ms["value"] = 7000
+        window.refresh_ui()
+        self.assertEqual(window.state.edit_mode, 0)
 
     def test_run_auto_mode_does_not_remember_blocked_mode(self):
         app = QApplication.instance() or QApplication([])
