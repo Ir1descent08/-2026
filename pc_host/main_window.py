@@ -134,6 +134,8 @@ class MainWindow(QMainWindow):
             self.process_incoming_line(line)
 
     def process_incoming_line(self, line: str) -> None:
+        from pc_host.services.chart_service import append_history_row
+
         message = parse_line(line)
         current_request = self.scheduler.current_request_text()
         if message.kind == "pong":
@@ -155,6 +157,8 @@ class MainWindow(QMainWindow):
         elif message.kind == "event":
             self.state.apply_event(message.event_name, message.payload)
             self.log_panel.append_entry("event", line)
+            if message.event_name in ("MODE", "KEY", "ALARM", "ALARM_OFF"):
+                append_history_row(str(self.history_csv), message.event_name.lower(), message.payload)
             if (message.event_name == "KEY") and (message.payload == "USER1"):
                 self.run_ntp_sync()
         else:

@@ -1,3 +1,5 @@
+import csv
+import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 from PyQt5.QtWidgets import QApplication
@@ -99,6 +101,22 @@ class MainWindowFlowTests(unittest.TestCase):
         with patch.object(window, "run_ntp_sync") as run_ntp_sync:
             window.process_incoming_line("*EVT:KEY USER1")
         run_ntp_sync.assert_called_once_with()
+
+    def test_event_history_persists_key_mode_and_alarm_events(self):
+        app = QApplication.instance() or QApplication([])
+        serial_manager = FakeSerialManager()
+        window = MainWindow(serial_manager=serial_manager, now_ms=lambda: 10_000)
+        with tempfile.NamedTemporaryFile("w+", delete=False, suffix=".csv") as handle:
+            window.history_csv = type(window.history_csv)(handle.name)
+        with patch.object(window, "run_ntp_sync"):
+            window.process_incoming_line("*EVT:KEY USER1")
+        window.process_incoming_line("*EVT:MODE NIGHT")
+        window.process_incoming_line("*EVT:ALARM")
+        window.process_incoming_line("*EVT:ALARM_OFF")
+        with open(window.history_csv, "r", encoding="utf-8") as handle:
+            rows = list(csv.reader(handle))
+        self.assertEqual([row[1] for row in rows], ["key", "mode", "alarm", "alarm_off"])
+        self.assertEqual([row[2] for row in rows], ["USER1", "NIGHT", "", ""])
 
     def test_weather_fetch_enqueues_weather_command(self):
         app = QApplication.instance() or QApplication([])

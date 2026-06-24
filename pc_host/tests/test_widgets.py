@@ -83,13 +83,14 @@ class ControlPanelTests(unittest.TestCase):
 class WidgetTests(unittest.TestCase):
     def test_status_bar_renders_state_text(self):
         app = QApplication.instance() or QApplication([])
-        state = DeviceState(connected=True, ready=True, port_name="COM3", format_value="LEFT", mode_value="DAY", alarm_value="OFF", last_rtt_ms=23)
+        state = DeviceState(connected=True, ready=True, port_name="COM3", format_value="LEFT", mode_value="DAY", alarm_value="OFF", display_enabled="ON", last_rtt_ms=23)
         widget = StatusBarWidget()
         widget.update_state(state)
         self.assertEqual(widget.port_value.text(), "COM3")
         self.assertEqual(widget.connection_value.text(), "已连接")
         self.assertEqual(widget.ready_value.text(), "READY")
         self.assertEqual(widget.format_value.text(), "LEFT")
+        self.assertEqual(widget.display_value.text(), "ON")
 
     def test_log_panel_appends_and_exports(self):
         app = QApplication.instance() or QApplication([])

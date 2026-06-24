@@ -124,6 +124,7 @@ static void HandleSetFormat(char *tokens[], uint8_t count);
 static void HandleSetMode(char *tokens[], uint8_t count);
 static void HandleGetDisplay(char *tokens[], uint8_t count);
 static void HandleGetFormat(char *tokens[], uint8_t count);
+static void HandleGetMode(char *tokens[], uint8_t count);
 static void HandleGetLed(char *tokens[], uint8_t count);
 static void HandleSetLed(char *tokens[], uint8_t count);
 static void HandleSetBeep(char *tokens[], uint8_t count);
@@ -208,6 +209,12 @@ static volatile uint8_t g_edit_mode;
 static volatile uint8_t g_edit_field;
 static volatile uint8_t g_edit_blink_phase;
 static volatile uint16_t g_edit_blink_timer;
+static volatile uint16_t g_edit_idle_timer;
+static DateTime g_edit_snapshot_now;
+static uint8_t g_edit_snapshot_alarm_hour;
+static uint8_t g_edit_snapshot_alarm_minute;
+static uint8_t g_edit_snapshot_alarm_second;
+static uint8_t g_edit_snapshot_alarm_enabled;
 static volatile uint8_t g_func_key_held;
 static volatile uint16_t g_func_hold_timer;
 static volatile uint8_t g_add_key_held;
@@ -376,6 +383,7 @@ static void ResetProtocolState(void)
     g_edit_field = 0;
     g_edit_blink_phase = 1;
     g_edit_blink_timer = 0;
+    g_edit_idle_timer = 0;
     g_func_key_held = 0;
     g_func_hold_timer = 0;
     g_add_key_held = 0;
@@ -626,6 +634,11 @@ static void HandleGetCommand(char *subcommand, char *cursor)
     if (MatchToken(subcommand, "FORMAT"))
     {
         HandleGetFormat(tokens, count);
+        return;
+    }
+    if (MatchToken(subcommand, "MODE"))
+    {
+        HandleGetMode(tokens, count);
         return;
     }
     if (MatchToken(subcommand, "LED"))
@@ -1467,6 +1480,17 @@ static void HandleGetFormat(char *tokens[], uint8_t count)
         return;
     }
     UARTReplyOK((g_format_left != 0) ? "LEFT" : "RIGHT");
+}
+
+static void HandleGetMode(char *tokens[], uint8_t count)
+{
+    (void)tokens;
+    if (count != 0)
+    {
+        UARTReplyError("PARAM");
+        return;
+    }
+    UARTReplyOK((g_mode_day != 0) ? "DAY" : "NIGHT");
 }
 
 static void HandleGetLed(char *tokens[], uint8_t count)
@@ -2474,6 +2498,16 @@ static void ApplyVirtualKey(const char *name)
         }
         if (g_edit_mode == 0)
         {
+            g_edit_snapshot_now.year = g_now.year;
+            g_edit_snapshot_now.month = g_now.month;
+            g_edit_snapshot_now.date = g_now.date;
+            g_edit_snapshot_now.hour = g_now.hour;
+            g_edit_snapshot_now.minute = g_now.minute;
+            g_edit_snapshot_now.second = g_now.second;
+            g_edit_snapshot_alarm_hour = g_alarm_hour;
+            g_edit_snapshot_alarm_minute = g_alarm_minute;
+            g_edit_snapshot_alarm_second = g_alarm_second;
+            g_edit_snapshot_alarm_enabled = g_alarm_enabled;
             g_edit_mode = 1;
             g_edit_field = 0;
         }
@@ -2492,6 +2526,7 @@ static void ApplyVirtualKey(const char *name)
         }
         g_edit_blink_phase = 1;
         g_edit_blink_timer = 0;
+        g_edit_idle_timer = 0;
         g_scroll_offset = 0;
         g_scroll_elapsed_ms = 0;
         g_display_dirty = 1;
@@ -2520,6 +2555,7 @@ static void ApplyVirtualKey(const char *name)
             char edit_msg[32];
             g_edit_mode = 0;
             g_edit_field = 0;
+            g_edit_idle_timer = 0;
             if (saved_mode == 1)
             {
                 snprintf(edit_msg, sizeof(edit_msg), "EDIT DATE %02u%02u%02u",
@@ -2592,6 +2628,7 @@ static void ApplyVirtualKey(const char *name)
             }
             g_edit_blink_phase = 1;
             g_edit_blink_timer = 0;
+            g_edit_idle_timer = 0;
         }
         g_display_dirty = 1;
         return;
@@ -2601,6 +2638,7 @@ static void ApplyVirtualKey(const char *name)
     {
         if (g_edit_mode != 0)
         {
+            g_edit_idle_timer = 0;
             IncrementEditField();
         }
         return;
@@ -3317,12 +3355,35 @@ void SysTick_Handler(void)
 
     if (g_edit_mode != 0)
     {
-        g_edit_blink_timer++;
-        if (g_edit_blink_timer >= 500)
+        g_edit_idle_timer++;
+        if (g_edit_idle_timer >= 5000u)
         {
+            g_now.year = g_edit_snapshot_now.year;
+            g_now.month = g_edit_snapshot_now.month;
+            g_now.date = g_edit_snapshot_now.date;
+            g_now.hour = g_edit_snapshot_now.hour;
+            g_now.minute = g_edit_snapshot_now.minute;
+            g_now.second = g_edit_snapshot_now.second;
+            g_alarm_hour = g_edit_snapshot_alarm_hour;
+            g_alarm_minute = g_edit_snapshot_alarm_minute;
+            g_alarm_second = g_edit_snapshot_alarm_second;
+            g_alarm_enabled = g_edit_snapshot_alarm_enabled;
+            g_edit_mode = 0;
+            g_edit_field = 0;
+            g_edit_blink_phase = 1;
             g_edit_blink_timer = 0;
-            g_edit_blink_phase ^= 1u;
+            g_edit_idle_timer = 0;
             g_display_dirty = 1;
+        }
+        else
+        {
+            g_edit_blink_timer++;
+            if (g_edit_blink_timer >= 500)
+            {
+                g_edit_blink_timer = 0;
+                g_edit_blink_phase ^= 1u;
+                g_display_dirty = 1;
+            }
         }
     }
 

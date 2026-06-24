@@ -29,6 +29,8 @@ class DeviceState:
             self.format_value = payload
         elif query_name == "ALARM":
             self.alarm_value = payload
+        elif query_name == "MODE":
+            self.mode_value = payload
         elif query_name == "DATE":
             self.date_value = payload
         elif query_name == "TIME":

@@ -43,7 +43,7 @@ class CommandRulesTests(unittest.TestCase):
         self.assertEqual(build_followups("*SET:DISPLAY OFF"), ("*GET:DISPLAY",))
         self.assertEqual(
             [item.text for item in initial_sync_requests()],
-            ["*GET:DISPLAY", "*GET:FORMAT", "*GET:DATE", "*GET:TIME", "*GET:ALARM"],
+            ["*GET:DISPLAY", "*GET:FORMAT", "*GET:MODE", "*GET:DATE", "*GET:TIME", "*GET:ALARM"],
         )
 
     def test_invalid_set_key_is_rejected_in_mcu_source(self):

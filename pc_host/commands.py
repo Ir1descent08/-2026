@@ -53,6 +53,7 @@ def initial_sync_requests() -> list[CommandRequest]:
     return [
         CommandRequest("*GET:DISPLAY"),
         CommandRequest("*GET:FORMAT"),
+        CommandRequest("*GET:MODE"),
         CommandRequest("*GET:DATE"),
         CommandRequest("*GET:TIME"),
         CommandRequest("*GET:ALARM"),
@@ -64,6 +65,8 @@ def query_name_for(command: str) -> Optional[str]:
         return "DISPLAY"
     if command.startswith("*GET:FORMAT"):
         return "FORMAT"
+    if command.startswith("*GET:MODE"):
+        return "MODE"
     if command.startswith("*GET:DATE"):
         return "DATE"
     if command.startswith("*GET:TIME"):

@@ -13,6 +13,7 @@ class StatusBarWidget(QWidget):
         layout.addWidget(QLabel("FORMAT"), 1, 0)
         layout.addWidget(QLabel("MODE"), 1, 2)
         layout.addWidget(QLabel("ALARM"), 1, 4)
+        layout.addWidget(QLabel("DISPLAY"), 1, 6)
         self.port_value = QLabel("-")
         self.connection_value = QLabel("未连接")
         self.ready_value = QLabel("WAIT")
@@ -20,6 +21,7 @@ class StatusBarWidget(QWidget):
         self.format_value = QLabel("UNKNOWN")
         self.mode_value = QLabel("UNKNOWN")
         self.alarm_value = QLabel("UNKNOWN")
+        self.display_value = QLabel("UNKNOWN")
         layout.addWidget(self.port_value, 0, 1)
         layout.addWidget(self.connection_value, 0, 3)
         layout.addWidget(self.ready_value, 0, 5)
@@ -27,6 +29,7 @@ class StatusBarWidget(QWidget):
         layout.addWidget(self.format_value, 1, 1)
         layout.addWidget(self.mode_value, 1, 3)
         layout.addWidget(self.alarm_value, 1, 5)
+        layout.addWidget(self.display_value, 1, 7)
 
     def update_state(self, state) -> None:
         self.port_value.setText(state.port_name or "-")
@@ -36,3 +39,4 @@ class StatusBarWidget(QWidget):
         self.format_value.setText(state.format_value)
         self.mode_value.setText(state.mode_value)
         self.alarm_value.setText(state.alarm_value)
+        self.display_value.setText(state.display_enabled)
