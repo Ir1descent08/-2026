@@ -3456,13 +3456,13 @@ void SysTick_Handler(void)
             }
             disp_chars[DISPLAY_DIGITS] = '\0';
             dp = g_display_dot_mask;
+            led_val = ComputeLedOutput();
 
             snprintf(evt_buf, sizeof(evt_buf), "DISP %s %02X", disp_chars, dp);
             UARTStringPut("*EVT:");
             UARTStringPut(evt_buf);
             UARTStringPut("\r\n");
 
-            led_val = ComputeLedOutput();
             snprintf(evt_buf, sizeof(evt_buf), "LED %02X", led_val);
             UARTStringPut("*EVT:");
             UARTStringPut(evt_buf);

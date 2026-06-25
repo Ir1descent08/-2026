@@ -134,6 +134,18 @@ class TwinPanelTests(unittest.TestCase):
         self.assertEqual(panel.digit_labels[0].text(), " ")
         self.assertEqual(panel.digit_labels[1].text(), " ")
 
+    def test_twin_panel_uses_reported_led_state_without_local_override(self):
+        app = QApplication.instance() or QApplication([])
+        state = DeviceState(led_hex="08", mode_value="NIGHT", ui_now_ms=0, ready=True)
+        panel = TwinPanel()
+        panel.update_state(state)
+        self.assertEqual(panel.led_labels[3].text(), "●")
+        self.assertEqual(panel.led_labels[0].text(), "○")
+        state.ui_now_ms = 700
+        panel.update_state(state)
+        self.assertEqual(panel.led_labels[3].text(), "●")
+        self.assertEqual(panel.led_labels[0].text(), "○")
+
     def test_twin_panel_key_layout_matches_board_order(self):
         app = QApplication.instance() or QApplication([])
         panel = TwinPanel()

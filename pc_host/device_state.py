@@ -58,8 +58,6 @@ class DeviceState:
             self.display_enabled = command.rsplit(" ", 1)[1]
         if command == "*SET:ALARM OFF":
             self.alarm_value = "OFF"
-        if command.startswith("*SET:LED "):
-            self.led_hex = command.rsplit(" ", 1)[1]
 
     def apply_event(self, event_name: str, payload: str) -> None:
         if event_name == "KEY":

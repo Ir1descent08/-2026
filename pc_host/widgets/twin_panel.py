@@ -155,11 +155,6 @@ class TwinPanel(QWidget):
         for index, char in enumerate(chars):
             self.digit_widgets[index].set_character(" " if char == "_" else char, bool(dot_mask & (1 << index)))
         led_value = int(state.led_hex, 16)
-        heartbeat_bit = 0x01 if ((state.ui_now_ms // 500) % 2) == 0 else 0x00
-        if state.mode_value == "NIGHT":
-            led_value = heartbeat_bit
-        else:
-            led_value = (led_value & 0xFE) | heartbeat_bit
         for index, label in enumerate(self.led_labels):
             label.setText("●" if ((led_value >> index) & 0x01) else "○")
         for name, button in self.key_buttons.items():

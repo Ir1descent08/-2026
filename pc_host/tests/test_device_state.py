@@ -10,11 +10,12 @@ class DeviceStateTests(unittest.TestCase):
         self.assertEqual(state.format_value, "LEFT")
         self.assertEqual(state.display_enabled, "ON")
 
-    def test_apply_shadow_tracks_mode_led_and_reset_defaults(self):
+    def test_apply_shadow_tracks_mode_and_reset_defaults(self):
         state = DeviceState()
         state.apply_shadow_from_command("*SET:MODE NIGHT")
         state.apply_shadow_from_command("*SET:LED AA")
         state.apply_shadow_from_command("*SET:FORMAT RIGHT")
+        self.assertEqual(state.led_hex, "00")
         state.apply_shadow_from_command("*RST")
         self.assertEqual(state.mode_value, "DAY")
         self.assertEqual(state.format_value, "LEFT")
