@@ -543,11 +543,11 @@ static void ProcessCommand(char *line)
 
     if (MatchToken(command, "*SET"))
     {
-        if (subcommand == 0)
+        if ((subcommand == 0) || (*subcommand == '\0'))
         {
             subcommand = NextToken(&cursor);
         }
-        if (subcommand == 0)
+        if ((subcommand == 0) || (*subcommand == '\0'))
         {
             UARTReplyError("SYNTAX");
             return;
@@ -558,11 +558,11 @@ static void ProcessCommand(char *line)
 
     if (MatchToken(command, "*GET"))
     {
-        if (subcommand == 0)
+        if ((subcommand == 0) || (*subcommand == '\0'))
         {
             subcommand = NextToken(&cursor);
         }
-        if (subcommand == 0)
+        if ((subcommand == 0) || (*subcommand == '\0'))
         {
             UARTReplyError("SYNTAX");
             return;
