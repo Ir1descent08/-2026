@@ -37,6 +37,7 @@ class DeviceState:
     game_avg_result_ms: int = 0
     game_success_count: int = 0
     game_last_outcome: str = ""
+    game_sum_result_ms: int = 0
 
     def apply_query_result(self, query_name: str, payload: str) -> None:
         if query_name == "DISPLAY":
@@ -124,6 +125,7 @@ class DeviceState:
         self.game_avg_result_ms = 0
         self.game_success_count = 0
         self.game_last_outcome = ""
+        self.game_sum_result_ms = 0
 
     def apply_game_event(self, payload: str) -> None:
         parts = payload.split()
@@ -146,6 +148,9 @@ class DeviceState:
             self.game_round_index = int(parts[1])
             self.game_target_key = parts[2]
             self.game_last_result_ms = int(parts[3])
+            self.game_success_count += 1
+            self.game_sum_result_ms += self.game_last_result_ms
+            self.game_avg_result_ms = self.game_sum_result_ms // self.game_success_count
             if (self.game_best_result_ms == 0) or (self.game_last_result_ms < self.game_best_result_ms):
                 self.game_best_result_ms = self.game_last_result_ms
             return
@@ -170,6 +175,7 @@ class DeviceState:
             self.game_success_count = int(parts[2])
             self.game_best_result_ms = int(parts[3])
             self.game_avg_result_ms = int(parts[4])
+            self.game_sum_result_ms = self.game_avg_result_ms * self.game_success_count
             return
         if action == "STOP":
             self.reset_game_state()

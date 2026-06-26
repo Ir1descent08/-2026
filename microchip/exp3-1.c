@@ -1733,8 +1733,13 @@ static void HandleSetGame(char *tokens[], uint8_t count)
 
     if (MatchToken(tokens[0], "STOP"))
     {
-        ResetGameState();
+        if ((g_game_active == 0) && (g_game_state == GAME_STATE_IDLE))
+        {
+            UARTReplyOK(0);
+            return;
+        }
         EmitGameEventStop();
+        ResetGameState();
         UARTReplyOK(0);
         return;
     }
@@ -2080,6 +2085,14 @@ static uint8_t ComputeLedOutput(void)
         if (g_game_state == GAME_STATE_GO)
         {
             return GameTargetLedMask(g_game_target_index);
+        }
+        if ((g_game_state == GAME_STATE_RESULT) && (g_game_result_show_ms > (GAME_RESULT_SHOW_MS - 150u)))
+        {
+            return 0x0Fu;
+        }
+        if ((g_game_state == GAME_STATE_DONE) && (g_game_result_show_ms > (GAME_RESULT_SHOW_MS - 150u)))
+        {
+            return 0x0Fu;
         }
         return 0x00u;
     }
@@ -2666,7 +2679,7 @@ static void BuildGameDisplayText(char *text, size_t size)
 {
     if (g_game_state == GAME_STATE_WAIT)
     {
-        snprintf(text, size, "WAIT");
+        snprintf(text, size, "READY");
         return;
     }
     if (g_game_state == GAME_STATE_GO)
@@ -2690,13 +2703,20 @@ static void BuildGameDisplayText(char *text, size_t size)
         }
         else
         {
-            snprintf(text, size, "WAIT");
+            snprintf(text, size, "READY");
         }
         return;
     }
     if (g_game_state == GAME_STATE_DONE)
     {
-        snprintf(text, size, "AVG %u", (unsigned)g_game_done_avg_ms);
+        if (g_game_result_show_ms > (GAME_RESULT_SHOW_MS / 2u))
+        {
+            snprintf(text, size, "BEST%u", (unsigned)g_game_best_result_ms);
+        }
+        else
+        {
+            snprintf(text, size, "AVG %u", (unsigned)g_game_done_avg_ms);
+        }
         return;
     }
     snprintf(text, size, "        ");
