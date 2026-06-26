@@ -160,7 +160,7 @@ class MainWindow(QMainWindow):
             if message.event_name == "KEY":
                 self.state.apply_key_shadow(message.payload, self._now_ms())
             self.log_panel.append_entry("event", line)
-            if message.event_name in ("MODE", "KEY", "ALARM", "ALARM_OFF"):
+            if message.event_name in ("MODE", "KEY", "ALARM", "ALARM_OFF", "GAME"):
                 append_history_row(str(self.history_csv), message.event_name.lower(), message.payload)
             if (message.event_name == "KEY") and (message.payload == "USER1"):
                 self.run_ntp_sync()

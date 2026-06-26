@@ -170,14 +170,20 @@ class DeviceState:
             return
         if (action == "DONE") and (len(parts) >= 5):
             self.game_state = "DONE"
-            self.game_total_rounds = int(parts[1])
-            self.game_round_index = self.game_total_rounds
+            self.game_round_index = int(parts[1])
+            self.game_total_rounds = self.game_round_index
+            self.game_target_key = ""
+            self.game_last_outcome = "DONE"
             self.game_success_count = int(parts[2])
             self.game_best_result_ms = int(parts[3])
             self.game_avg_result_ms = int(parts[4])
             self.game_sum_result_ms = self.game_avg_result_ms * self.game_success_count
             return
         if action == "STOP":
+            self.reset_game_state()
+            self.game_last_outcome = "STOP"
+            return
+        if action == "IDLE":
             self.reset_game_state()
 
     def apply_key_shadow(self, key_name: str, now_ms: int) -> None:

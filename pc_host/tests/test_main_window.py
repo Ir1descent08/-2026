@@ -243,6 +243,20 @@ class MainWindowFlowTests(unittest.TestCase):
         window.process_incoming_line("*EVT:GAME READY 2 FUNC")
         self.assertEqual(window.control_panel.game_state_label.text(), "状态：GO")
         self.assertEqual(window.control_panel.game_target_label.text(), "目标：FUNC")
+        window.process_incoming_line("*EVT:GAME MISS 2 FUNC SHIFT")
+        self.assertEqual(window.control_panel.game_outcome_label.text(), "结果：MISS")
+
+    def test_game_events_persist_history(self):
+        app = QApplication.instance() or QApplication([])
+        serial_manager = FakeSerialManager()
+        window = MainWindow(serial_manager=serial_manager, now_ms=lambda: 10_000)
+        with tempfile.NamedTemporaryFile("w+", delete=False, suffix=".csv") as handle:
+            window.history_csv = type(window.history_csv)(handle.name)
+        window.process_incoming_line("*EVT:GAME HIT 2 FUNC 284")
+        with open(window.history_csv, "r", encoding="utf-8") as handle:
+            rows = list(csv.reader(handle))
+        self.assertEqual(rows[-1][1], "game")
+        self.assertEqual(rows[-1][2], "HIT 2 FUNC 284")
 
     def test_game_buttons_enqueue_commands(self):
         app = QApplication.instance() or QApplication([])
