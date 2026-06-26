@@ -61,6 +61,20 @@
 #define KEY_EVENT_EXT               8
 #define KEY_EVENT_SHIFT             9
 #define KEY_EVENT_ADD               10
+#define GAME_STATE_IDLE             0
+#define GAME_STATE_WAIT             1
+#define GAME_STATE_GO               2
+#define GAME_STATE_RESULT           3
+#define GAME_STATE_DONE             4
+#define GAME_OUTCOME_NONE           0
+#define GAME_OUTCOME_HIT            1
+#define GAME_OUTCOME_MISS           2
+#define GAME_OUTCOME_TIMEOUT        3
+#define GAME_TOTAL_ROUNDS_DEFAULT   5
+#define GAME_WAIT_MIN_MS            1000u
+#define GAME_WAIT_RANGE_MS          2000u
+#define GAME_GO_TIMEOUT_MS          2000u
+#define GAME_RESULT_SHOW_MS         1000u
 
 #define TCA6424_I2CADDR             0x22
 #define PCA9557_I2CADDR             0x18
@@ -131,6 +145,27 @@ static void HandleSetBeep(char *tokens[], uint8_t count);
 static void HandleSetKey(char *tokens[], uint8_t count);
 static void HandleSetMsg(char *cursor);
 static void HandleSetWeather(char *tokens[], uint8_t count);
+static void HandleSetGame(char *tokens[], uint8_t count);
+static void HandleGetGame(char *tokens[], uint8_t count);
+static void ResetGameState(void);
+static void StartGameSession(void);
+static void StartGameRound(void);
+static void ProcessGameTask(void);
+static void HandleGameKeyEvent(const char *key_name);
+static void FinishGameHit(const char *key_name, uint16_t elapsed_ms);
+static void FinishGameMiss(const char *expected_key, const char *actual_key);
+static void FinishGameTimeout(void);
+static void FinishGameSession(void);
+static void EmitGameEvent(const char *detail);
+static void EmitGameEventStart(void);
+static void EmitGameEventReady(uint8_t round, const char *target);
+static void EmitGameEventHit(uint8_t round, const char *target, uint16_t elapsed_ms);
+static void EmitGameEventMiss(uint8_t round, const char *target, const char *actual_key);
+static void EmitGameEventTimeout(uint8_t round, const char *target);
+static void EmitGameEventDone(uint8_t rounds, uint8_t success, uint16_t best_ms, uint16_t avg_ms);
+static void EmitGameEventStop(void);
+static const char *GameTargetKeyName(uint8_t index);
+static uint8_t GameTargetLedMask(uint8_t index);
 static void ApplyLedOutput(void);
 static uint8_t ComputeLedOutput(void);
 static void ApplyDisplayOutput(void);
@@ -138,6 +173,7 @@ static void AdvanceBootSequence(void);
 static void UpdateDisplayBuffer(void);
 static void FillDisplayText(const char *text);
 static void ReverseText(char *text);
+static void BuildGameDisplayText(char *text, size_t size);
 static void BuildCompactDateText(char *text, size_t size);
 static void BuildCompactTimeText(char *text, size_t size);
 static void BuildCompactAlarmText(char *text, size_t size);
@@ -239,6 +275,20 @@ static volatile uint8_t g_time_synced;
 static volatile uint8_t g_weather_temp;
 static volatile uint8_t g_weather_flags;
 static volatile uint16_t g_weather_show_ms;
+static volatile uint8_t g_game_state;
+static volatile uint8_t g_game_active;
+static volatile uint8_t g_game_round;
+static volatile uint8_t g_game_total_rounds;
+static volatile uint8_t g_game_target_index;
+static volatile uint8_t g_game_success_count;
+static volatile uint8_t g_game_last_outcome;
+static volatile uint16_t g_game_wait_ms;
+static volatile uint16_t g_game_go_elapsed_ms;
+static volatile uint16_t g_game_result_show_ms;
+static volatile uint16_t g_game_last_result_ms;
+static volatile uint16_t g_game_best_result_ms;
+static volatile uint16_t g_game_done_avg_ms;
+static volatile uint32_t g_game_sum_result_ms;
 static volatile char g_uart_lines[2][UART_FRAME_MAX_LEN + 1];
 static char g_message[MSG_MAX_LEN + 1];
 static char g_last_key[KEY_NAME_MAX_LEN + 1];
@@ -270,6 +320,7 @@ int main(void)
     {
         ProcessPendingUart();
         ProcessKeyTask();
+        ProcessGameTask();
         ProcessDisplayTask();
     }
 }
@@ -409,6 +460,7 @@ static void ResetProtocolState(void)
     g_weather_flags = 0;
     g_weather_show_ms = 0;
     ResetClockState();
+    ResetGameState();
 }
 
 static void ProcessPendingUart(void)
@@ -590,6 +642,11 @@ static void HandleSetCommand(char *subcommand, char *cursor)
         HandleSetWeather(tokens, count);
         return;
     }
+    if (MatchToken(subcommand, "GAME"))
+    {
+        HandleSetGame(tokens, count);
+        return;
+    }
 
     UARTReplyError("PARAM");
 }
@@ -644,6 +701,11 @@ static void HandleGetCommand(char *subcommand, char *cursor)
     if (MatchToken(subcommand, "LED"))
     {
         HandleGetLed(tokens, count);
+        return;
+    }
+    if (MatchToken(subcommand, "GAME"))
+    {
+        HandleGetGame(tokens, count);
         return;
     }
 
@@ -1581,6 +1643,13 @@ static void HandleSetKey(char *tokens[], uint8_t count)
     }
 
     memcpy(g_last_key, tokens[0], length + 1);
+    if ((g_game_active != 0) && ((g_game_state == GAME_STATE_WAIT) || (g_game_state == GAME_STATE_GO)) &&
+        (MatchToken(tokens[0], "FUNC") || MatchToken(tokens[0], "SHIFT") || MatchToken(tokens[0], "ADD") || MatchToken(tokens[0], "SAVE")))
+    {
+        HandleGameKeyEvent(tokens[0]);
+        UARTReplyOK(0);
+        return;
+    }
     ApplyVirtualKey(tokens[0]);
     UARTReplyOK(0);
 }
@@ -1642,9 +1711,378 @@ static void HandleSetWeather(char *tokens[], uint8_t count)
     UARTReplyOK(0);
 }
 
+static void HandleSetGame(char *tokens[], uint8_t count)
+{
+    if (count != 1)
+    {
+        UARTReplyError("SYNTAX");
+        return;
+    }
+
+    if (MatchToken(tokens[0], "START"))
+    {
+        if (g_game_active != 0)
+        {
+            UARTReplyError("BUSY");
+            return;
+        }
+        StartGameSession();
+        UARTReplyOK(0);
+        return;
+    }
+
+    if (MatchToken(tokens[0], "STOP"))
+    {
+        ResetGameState();
+        EmitGameEventStop();
+        UARTReplyOK(0);
+        return;
+    }
+
+    UARTReplyError("PARAM");
+}
+
+static void HandleGetGame(char *tokens[], uint8_t count)
+{
+    char response[64];
+
+    if (count != 0)
+    {
+        UARTReplyError("SYNTAX");
+        return;
+    }
+
+    if (g_game_state == GAME_STATE_IDLE)
+    {
+        UARTReplyOK("IDLE");
+        return;
+    }
+
+    if (g_game_state == GAME_STATE_WAIT)
+    {
+        snprintf(response, sizeof(response), "WAIT %u/%u",
+                 (unsigned)g_game_round, (unsigned)g_game_total_rounds);
+        UARTReplyOK(response);
+        return;
+    }
+
+    if (g_game_state == GAME_STATE_GO)
+    {
+        snprintf(response, sizeof(response), "GO %u/%u %s",
+                 (unsigned)g_game_round,
+                 (unsigned)g_game_total_rounds,
+                 GameTargetKeyName(g_game_target_index));
+        UARTReplyOK(response);
+        return;
+    }
+
+    if (g_game_state == GAME_STATE_RESULT)
+    {
+        snprintf(response, sizeof(response), "RESULT %u/%u %u",
+                 (unsigned)g_game_round,
+                 (unsigned)g_game_total_rounds,
+                 (unsigned)g_game_last_result_ms);
+        UARTReplyOK(response);
+        return;
+    }
+
+    snprintf(response, sizeof(response), "DONE %u %u %u %u",
+             (unsigned)g_game_total_rounds,
+             (unsigned)g_game_success_count,
+             (unsigned)g_game_best_result_ms,
+             (unsigned)g_game_done_avg_ms);
+    UARTReplyOK(response);
+}
+
+static void ResetGameState(void)
+{
+    g_game_state = GAME_STATE_IDLE;
+    g_game_active = 0;
+    g_game_round = 0;
+    g_game_total_rounds = GAME_TOTAL_ROUNDS_DEFAULT;
+    g_game_target_index = 0;
+    g_game_success_count = 0;
+    g_game_last_outcome = GAME_OUTCOME_NONE;
+    g_game_wait_ms = 0;
+    g_game_go_elapsed_ms = 0;
+    g_game_result_show_ms = 0;
+    g_game_last_result_ms = 0;
+    g_game_best_result_ms = 0;
+    g_game_done_avg_ms = 0;
+    g_game_sum_result_ms = 0;
+    g_display_dirty = 1;
+    ApplyLedOutput();
+}
+
+static void StartGameSession(void)
+{
+    ResetGameState();
+    g_game_active = 1;
+    g_game_round = 1;
+    g_game_total_rounds = GAME_TOTAL_ROUNDS_DEFAULT;
+    EmitGameEventStart();
+    StartGameRound();
+}
+
+static void StartGameRound(void)
+{
+    uint32_t seed = g_uptime_s + g_tick_1s + g_game_round + g_board_key_stable_value;
+
+    g_game_state = GAME_STATE_WAIT;
+    g_game_wait_ms = (uint16_t)(GAME_WAIT_MIN_MS + (seed % GAME_WAIT_RANGE_MS));
+    g_game_target_index = (uint8_t)(seed % 4u);
+    g_game_go_elapsed_ms = 0;
+    g_game_result_show_ms = 0;
+    g_game_last_result_ms = 0;
+    g_game_last_outcome = GAME_OUTCOME_NONE;
+    g_display_dirty = 1;
+    ApplyLedOutput();
+}
+
+static void ProcessGameTask(void)
+{
+    if (g_game_active == 0)
+    {
+        return;
+    }
+
+    if (g_game_state == GAME_STATE_WAIT)
+    {
+        if (g_game_wait_ms == 0)
+        {
+            g_game_state = GAME_STATE_GO;
+            g_game_go_elapsed_ms = 0;
+            EmitGameEventReady(g_game_round, GameTargetKeyName(g_game_target_index));
+            g_display_dirty = 1;
+            ApplyLedOutput();
+        }
+        return;
+    }
+
+    if (g_game_state == GAME_STATE_GO)
+    {
+        if (g_game_go_elapsed_ms >= GAME_GO_TIMEOUT_MS)
+        {
+            FinishGameTimeout();
+        }
+        return;
+    }
+
+    if (g_game_state == GAME_STATE_RESULT)
+    {
+        if (g_game_result_show_ms != 0)
+        {
+            return;
+        }
+        if (g_game_round < g_game_total_rounds)
+        {
+            g_game_round++;
+            StartGameRound();
+        }
+        else
+        {
+            FinishGameSession();
+        }
+        return;
+    }
+
+    if ((g_game_state == GAME_STATE_DONE) && (g_game_result_show_ms == 0))
+    {
+        ResetGameState();
+    }
+}
+
+static void HandleGameKeyEvent(const char *key_name)
+{
+    const char *expected_key = GameTargetKeyName(g_game_target_index);
+
+    if (g_game_active == 0)
+    {
+        return;
+    }
+
+    if (g_game_state == GAME_STATE_WAIT)
+    {
+        FinishGameMiss(expected_key, key_name);
+        return;
+    }
+
+    if (g_game_state != GAME_STATE_GO)
+    {
+        return;
+    }
+
+    if (MatchToken(key_name, expected_key))
+    {
+        FinishGameHit(expected_key, g_game_go_elapsed_ms);
+    }
+    else
+    {
+        FinishGameMiss(expected_key, key_name);
+    }
+}
+
+static void FinishGameHit(const char *key_name, uint16_t elapsed_ms)
+{
+    g_game_last_outcome = GAME_OUTCOME_HIT;
+    g_game_last_result_ms = elapsed_ms;
+    g_game_success_count++;
+    g_game_sum_result_ms += elapsed_ms;
+    if ((g_game_best_result_ms == 0) || (elapsed_ms < g_game_best_result_ms))
+    {
+        g_game_best_result_ms = elapsed_ms;
+    }
+    g_game_state = GAME_STATE_RESULT;
+    g_game_result_show_ms = GAME_RESULT_SHOW_MS;
+    EmitGameEventHit(g_game_round, key_name, elapsed_ms);
+    g_display_dirty = 1;
+    ApplyLedOutput();
+}
+
+static void FinishGameMiss(const char *expected_key, const char *actual_key)
+{
+    g_game_last_outcome = GAME_OUTCOME_MISS;
+    g_game_last_result_ms = 0;
+    g_game_state = GAME_STATE_RESULT;
+    g_game_result_show_ms = GAME_RESULT_SHOW_MS;
+    EmitGameEventMiss(g_game_round, expected_key, actual_key);
+    g_display_dirty = 1;
+    ApplyLedOutput();
+}
+
+static void FinishGameTimeout(void)
+{
+    g_game_last_outcome = GAME_OUTCOME_TIMEOUT;
+    g_game_last_result_ms = 0;
+    g_game_state = GAME_STATE_RESULT;
+    g_game_result_show_ms = GAME_RESULT_SHOW_MS;
+    EmitGameEventTimeout(g_game_round, GameTargetKeyName(g_game_target_index));
+    g_display_dirty = 1;
+    ApplyLedOutput();
+}
+
+static void FinishGameSession(void)
+{
+    if (g_game_success_count != 0)
+    {
+        g_game_done_avg_ms = (uint16_t)(g_game_sum_result_ms / g_game_success_count);
+    }
+    else
+    {
+        g_game_done_avg_ms = 0;
+    }
+    g_game_state = GAME_STATE_DONE;
+    g_game_result_show_ms = GAME_RESULT_SHOW_MS;
+    EmitGameEventDone(g_game_total_rounds,
+                      g_game_success_count,
+                      g_game_best_result_ms,
+                      g_game_done_avg_ms);
+    g_display_dirty = 1;
+    ApplyLedOutput();
+}
+
+static void EmitGameEvent(const char *detail)
+{
+    UARTStringPut("*EVT:GAME ");
+    UARTStringPut(detail);
+    UARTStringPut("\r\n");
+}
+
+static void EmitGameEventStart(void)
+{
+    EmitGameEvent("START");
+}
+
+static void EmitGameEventReady(uint8_t round, const char *target)
+{
+    char detail[48];
+    snprintf(detail, sizeof(detail), "READY %u %s", (unsigned)round, target);
+    EmitGameEvent(detail);
+}
+
+static void EmitGameEventHit(uint8_t round, const char *target, uint16_t elapsed_ms)
+{
+    char detail[48];
+    snprintf(detail, sizeof(detail), "HIT %u %s %u", (unsigned)round, target, (unsigned)elapsed_ms);
+    EmitGameEvent(detail);
+}
+
+static void EmitGameEventMiss(uint8_t round, const char *target, const char *actual_key)
+{
+    char detail[48];
+    snprintf(detail, sizeof(detail), "MISS %u %s %s", (unsigned)round, target, actual_key);
+    EmitGameEvent(detail);
+}
+
+static void EmitGameEventTimeout(uint8_t round, const char *target)
+{
+    char detail[48];
+    snprintf(detail, sizeof(detail), "TIMEOUT %u %s", (unsigned)round, target);
+    EmitGameEvent(detail);
+}
+
+static void EmitGameEventDone(uint8_t rounds, uint8_t success, uint16_t best_ms, uint16_t avg_ms)
+{
+    char detail[48];
+    snprintf(detail, sizeof(detail), "DONE %u %u %u %u",
+             (unsigned)rounds,
+             (unsigned)success,
+             (unsigned)best_ms,
+             (unsigned)avg_ms);
+    EmitGameEvent(detail);
+}
+
+static void EmitGameEventStop(void)
+{
+    EmitGameEvent("STOP");
+}
+
+static const char *GameTargetKeyName(uint8_t index)
+{
+    switch (index)
+    {
+    case 0:
+        return "FUNC";
+    case 1:
+        return "SHIFT";
+    case 2:
+        return "ADD";
+    case 3:
+        return "SAVE";
+    default:
+        return "FUNC";
+    }
+}
+
+static uint8_t GameTargetLedMask(uint8_t index)
+{
+    switch (index)
+    {
+    case 0:
+        return 0x01u;
+    case 1:
+        return 0x02u;
+    case 2:
+        return 0x04u;
+    case 3:
+        return 0x08u;
+    default:
+        return 0x01u;
+    }
+}
+
 static uint8_t ComputeLedOutput(void)
 {
     uint8_t led;
+
+    if (g_game_active != 0)
+    {
+        if (g_game_state == GAME_STATE_GO)
+        {
+            return GameTargetLedMask(g_game_target_index);
+        }
+        return 0x00u;
+    }
 
     if (g_led_override != 0)
     {
@@ -1862,12 +2300,22 @@ static void ProcessKeyTask(void)
     }
     if (event_code == KEY_EVENT_FUNC)
     {
+        if ((g_game_active != 0) && ((g_game_state == GAME_STATE_WAIT) || (g_game_state == GAME_STATE_GO)))
+        {
+            HandleGameKeyEvent("FUNC");
+            return;
+        }
         ApplyVirtualKey("FUNC");
         EmitKeyEvent("FUNC");
         return;
     }
     if (event_code == KEY_EVENT_SAVE)
     {
+        if ((g_game_active != 0) && ((g_game_state == GAME_STATE_WAIT) || (g_game_state == GAME_STATE_GO)))
+        {
+            HandleGameKeyEvent("SAVE");
+            return;
+        }
         ApplyVirtualKey("SAVE");
         EmitKeyEvent("SAVE");
         return;
@@ -1897,12 +2345,22 @@ static void ProcessKeyTask(void)
     }
     if (event_code == KEY_EVENT_SHIFT)
     {
+        if ((g_game_active != 0) && ((g_game_state == GAME_STATE_WAIT) || (g_game_state == GAME_STATE_GO)))
+        {
+            HandleGameKeyEvent("SHIFT");
+            return;
+        }
         ApplyVirtualKey("SHIFT");
         EmitKeyEvent("SHIFT");
         return;
     }
     if (event_code == KEY_EVENT_ADD)
     {
+        if ((g_game_active != 0) && ((g_game_state == GAME_STATE_WAIT) || (g_game_state == GAME_STATE_GO)))
+        {
+            HandleGameKeyEvent("ADD");
+            return;
+        }
         ApplyVirtualKey("ADD");
         EmitKeyEvent("ADD");
     }
@@ -1949,6 +2407,13 @@ static void UpdateDisplayBuffer(void)
         default:
             break;
         }
+    }
+
+    if ((g_game_active != 0) || (g_game_state == GAME_STATE_DONE))
+    {
+        BuildGameDisplayText(text, sizeof(text));
+        FillDisplayText(text);
+        return;
     }
 
     if (g_edit_mode != 0)
@@ -2195,6 +2660,46 @@ static void BuildWeatherText(char *text, size_t size)
         return;
     }
     snprintf(text, size, "WTH %02u", g_weather_temp);
+}
+
+static void BuildGameDisplayText(char *text, size_t size)
+{
+    if (g_game_state == GAME_STATE_WAIT)
+    {
+        snprintf(text, size, "WAIT");
+        return;
+    }
+    if (g_game_state == GAME_STATE_GO)
+    {
+        snprintf(text, size, "%u %s", (unsigned)g_game_round, GameTargetKeyName(g_game_target_index));
+        return;
+    }
+    if (g_game_state == GAME_STATE_RESULT)
+    {
+        if (g_game_last_outcome == GAME_OUTCOME_HIT)
+        {
+            snprintf(text, size, "%u", (unsigned)g_game_last_result_ms);
+        }
+        else if (g_game_last_outcome == GAME_OUTCOME_MISS)
+        {
+            snprintf(text, size, "FAIL");
+        }
+        else if (g_game_last_outcome == GAME_OUTCOME_TIMEOUT)
+        {
+            snprintf(text, size, "LATE");
+        }
+        else
+        {
+            snprintf(text, size, "WAIT");
+        }
+        return;
+    }
+    if (g_game_state == GAME_STATE_DONE)
+    {
+        snprintf(text, size, "AVG %u", (unsigned)g_game_done_avg_ms);
+        return;
+    }
+    snprintf(text, size, "        ");
 }
 
 static void RefreshDisplayDigit(void)
@@ -3351,6 +3856,22 @@ void SysTick_Handler(void)
         {
             g_display_dirty = 1;
         }
+    }
+
+    if (g_game_active != 0)
+    {
+        if ((g_game_state == GAME_STATE_WAIT) && (g_game_wait_ms > 0))
+        {
+            g_game_wait_ms--;
+        }
+        if (g_game_state == GAME_STATE_GO)
+        {
+            g_game_go_elapsed_ms++;
+        }
+    }
+    if (((g_game_state == GAME_STATE_RESULT) || (g_game_state == GAME_STATE_DONE)) && (g_game_result_show_ms > 0))
+    {
+        g_game_result_show_ms--;
     }
 
     if (g_edit_mode != 0)

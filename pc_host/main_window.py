@@ -172,6 +172,7 @@ class MainWindow(QMainWindow):
         self.state.expire_transient_state(self._now_ms())
         self.control_panel.set_connected(self.state.connected)
         self.control_panel.set_ready_enabled(self.state.ready)
+        self.control_panel.update_game_state(self.state)
         self.status_bar.update_state(self.state)
         self.twin_panel.update_state(self.state)
 

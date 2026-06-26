@@ -53,6 +53,30 @@ class DeviceStateTests(unittest.TestCase):
         self.assertEqual(state.edit_field, 0)
         self.assertEqual(state.edit_deadline_ms, 0)
 
+    def test_game_events_update_state(self):
+        state = DeviceState()
+        state.apply_event("GAME", "START")
+        self.assertEqual(state.game_state, "WAIT")
+        state.apply_event("GAME", "READY 2 FUNC")
+        self.assertEqual(state.game_state, "GO")
+        self.assertEqual(state.game_round_index, 2)
+        self.assertEqual(state.game_target_key, "FUNC")
+        state.apply_event("GAME", "HIT 2 FUNC 284")
+        self.assertEqual(state.game_last_outcome, "HIT")
+        self.assertEqual(state.game_last_result_ms, 284)
+        self.assertEqual(state.game_best_result_ms, 284)
+        state.apply_event("GAME", "DONE 5 4 231 308")
+        self.assertEqual(state.game_state, "DONE")
+        self.assertEqual(state.game_success_count, 4)
+        self.assertEqual(state.game_avg_result_ms, 308)
+
+    def test_game_shadow_updates_for_start_and_stop(self):
+        state = DeviceState()
+        state.apply_shadow_from_command("*SET:GAME START")
+        self.assertEqual(state.game_state, "WAIT")
+        state.apply_shadow_from_command("*SET:GAME STOP")
+        self.assertEqual(state.game_state, "IDLE")
+
 
 if __name__ == "__main__":
     unittest.main()

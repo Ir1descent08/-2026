@@ -236,6 +236,25 @@ class MainWindowFlowTests(unittest.TestCase):
         self.assertFalse(window.state.connected)
         self.assertIn("serial read failed", window.log_panel.text_edit.toPlainText())
 
+    def test_game_event_updates_control_panel_labels(self):
+        app = QApplication.instance() or QApplication([])
+        serial_manager = FakeSerialManager()
+        window = MainWindow(serial_manager=serial_manager, now_ms=lambda: 10_000)
+        window.process_incoming_line("*EVT:GAME READY 2 FUNC")
+        self.assertEqual(window.control_panel.game_state_label.text(), "状态：GO")
+        self.assertEqual(window.control_panel.game_target_label.text(), "目标：FUNC")
+
+    def test_game_buttons_enqueue_commands(self):
+        app = QApplication.instance() or QApplication([])
+        serial_manager = FakeSerialManager()
+        window = MainWindow(serial_manager=serial_manager, now_ms=lambda: 10_000)
+        window.state.ready = True
+        window.refresh_ui()
+        window.control_panel.game_start_button.click()
+        self.assertEqual(window.scheduler._queue[-1].text, "*SET:GAME START")
+        window.control_panel.game_stop_button.click()
+        self.assertEqual(window.scheduler._queue[-1].text, "*SET:GAME STOP")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -73,6 +73,8 @@ def query_name_for(command: str) -> Optional[str]:
         return "TIME"
     if command.startswith("*GET:ALARM"):
         return "ALARM"
+    if command.startswith("*GET:GAME"):
+        return "GAME"
     return None
 
 
@@ -93,4 +95,6 @@ def build_followups(command: str) -> tuple[str, ...]:
         return ("*GET:DISPLAY",)
     if command == "*SET:KEY FORMAT":
         return ("*GET:FORMAT",)
+    if command.startswith("*SET:GAME STOP"):
+        return ("*GET:GAME",)
     return ()

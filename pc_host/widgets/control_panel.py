@@ -1,6 +1,6 @@
 # pc_host/widgets/control_panel.py
 from PyQt5.QtCore import pyqtSignal
-from PyQt5.QtWidgets import QComboBox, QFormLayout, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QLineEdit, QPushButton, QVBoxLayout, QWidget
+from PyQt5.QtWidgets import QComboBox, QFormLayout, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
 from pc_host.commands import ABBREV_DEMO_COMMAND, CommandRequest, DEMO_PRESETS, KEY_LAYOUT_ROWS, MIXED_CASE_DEMO_COMMAND, build_followups
 
 
@@ -133,6 +133,32 @@ class ControlPanel(QWidget):
             extension_layout.addWidget(widget)
         layout.addWidget(extension_box)
 
+        game_box = QGroupBox("原创功能 / 反应测试")
+        game_layout = QFormLayout(game_box)
+        self.game_start_button = QPushButton("开始游戏")
+        self.game_stop_button = QPushButton("停止游戏")
+        game_buttons_widget = QWidget()
+        game_buttons = QHBoxLayout(game_buttons_widget)
+        game_buttons.setContentsMargins(0, 0, 0, 0)
+        game_buttons.addWidget(self.game_start_button)
+        game_buttons.addWidget(self.game_stop_button)
+        self.game_state_label = QLabel("状态：IDLE")
+        self.game_round_label = QLabel("轮次：0/5")
+        self.game_target_label = QLabel("目标：-")
+        self.game_last_label = QLabel("本次：-- ms")
+        self.game_best_label = QLabel("最佳：-- ms")
+        self.game_avg_label = QLabel("平均：-- ms")
+        self.game_success_label = QLabel("成功：0")
+        game_layout.addRow(game_buttons_widget)
+        game_layout.addRow(self.game_state_label)
+        game_layout.addRow(self.game_round_label)
+        game_layout.addRow(self.game_target_label)
+        game_layout.addRow(self.game_last_label)
+        game_layout.addRow(self.game_best_label)
+        game_layout.addRow(self.game_avg_label)
+        game_layout.addRow(self.game_success_label)
+        layout.addWidget(game_box)
+
         raw_box = QGroupBox("调试区")
         raw_layout = QHBoxLayout(raw_box)
         self.raw_input = QLineEdit()
@@ -164,6 +190,8 @@ class ControlPanel(QWidget):
         self.get_date_button.clicked.connect(lambda: self._emit("*GET:DATE"))
         self.get_time_button.clicked.connect(lambda: self._emit("*GET:TIME"))
         self.get_alarm_button.clicked.connect(lambda: self._emit("*GET:ALARM"))
+        self.game_start_button.clicked.connect(lambda: self._emit("*SET:GAME START"))
+        self.game_stop_button.clicked.connect(lambda: self._emit("*SET:GAME STOP"))
         self.connect_button.clicked.connect(lambda: self.connect_requested.emit(self.selected_port()))
         self.disconnect_button.clicked.connect(self.disconnect_requested.emit)
         self.refresh_button.clicked.connect(self.refresh_requested.emit)
@@ -240,7 +268,18 @@ class ControlPanel(QWidget):
             self.get_date_button,
             self.get_time_button,
             self.get_alarm_button,
+            self.game_start_button,
+            self.game_stop_button,
         ):
             button.setEnabled(ready)
         for button in self.key_buttons.values():
             button.setEnabled(ready)
+
+    def update_game_state(self, state) -> None:
+        self.game_state_label.setText(f"状态：{state.game_state}")
+        self.game_round_label.setText(f"轮次：{state.game_round_index}/{state.game_total_rounds}")
+        self.game_target_label.setText(f"目标：{state.game_target_key or '-'}")
+        self.game_last_label.setText(f"本次：{state.game_last_result_ms} ms" if state.game_last_result_ms > 0 else "本次：-- ms")
+        self.game_best_label.setText(f"最佳：{state.game_best_result_ms} ms" if state.game_best_result_ms > 0 else "最佳：-- ms")
+        self.game_avg_label.setText(f"平均：{state.game_avg_result_ms} ms" if state.game_avg_result_ms > 0 else "平均：-- ms")
+        self.game_success_label.setText(f"成功：{state.game_success_count}")
