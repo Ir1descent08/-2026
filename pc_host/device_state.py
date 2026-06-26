@@ -54,7 +54,14 @@ class DeviceState:
             self.time_value = payload
         elif query_name == "GAME":
             if payload == "IDLE":
-                self.reset_game_state()
+                if self.game_last_outcome in ("STOP", "DONE"):
+                    self.game_state = "IDLE"
+                    self.game_round_index = 0
+                    self.game_total_rounds = 5
+                    self.game_target_key = ""
+                    self.game_last_result_ms = 0
+                else:
+                    self.reset_game_state()
                 return
             parts = payload.split()
             if not parts:
@@ -64,6 +71,8 @@ class DeviceState:
                 current, total = parts[1].split("/", 1)
                 self.game_round_index = int(current)
                 self.game_total_rounds = int(total)
+                self.game_target_key = ""
+                self.game_last_outcome = ""
             elif (parts[0] == "GO") and (len(parts) >= 3) and ("/" in parts[1]):
                 current, total = parts[1].split("/", 1)
                 self.game_round_index = int(current)
@@ -75,10 +84,15 @@ class DeviceState:
                 self.game_total_rounds = int(total)
                 self.game_last_result_ms = int(parts[2])
             elif (parts[0] == "DONE") and (len(parts) >= 5):
-                self.game_total_rounds = int(parts[1])
+                self.game_state = "DONE"
+                self.game_round_index = int(parts[1])
+                self.game_total_rounds = self.game_round_index
+                self.game_target_key = ""
+                self.game_last_outcome = "DONE"
                 self.game_success_count = int(parts[2])
                 self.game_best_result_ms = int(parts[3])
                 self.game_avg_result_ms = int(parts[4])
+                self.game_sum_result_ms = self.game_avg_result_ms * self.game_success_count
 
     def apply_shadow_from_command(self, command: str) -> None:
         if command == "*RST":

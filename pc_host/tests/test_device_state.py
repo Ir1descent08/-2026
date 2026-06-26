@@ -82,6 +82,15 @@ class DeviceStateTests(unittest.TestCase):
         state.apply_shadow_from_command("*SET:GAME STOP")
         self.assertEqual(state.game_state, "IDLE")
 
+    def test_game_query_result_preserves_terminal_outcome(self):
+        state = DeviceState(game_last_outcome="STOP")
+        state.apply_query_result("GAME", "IDLE")
+        self.assertEqual(state.game_state, "IDLE")
+        self.assertEqual(state.game_last_outcome, "STOP")
+        state.apply_query_result("GAME", "DONE 5 4 231 308")
+        self.assertEqual(state.game_last_outcome, "DONE")
+        self.assertEqual(state.game_avg_result_ms, 308)
+
 
 if __name__ == "__main__":
     unittest.main()

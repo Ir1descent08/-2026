@@ -268,6 +268,8 @@ class MainWindowFlowTests(unittest.TestCase):
         self.assertEqual(window.scheduler._queue[-1].text, "*SET:GAME START")
         window.control_panel.game_stop_button.click()
         self.assertEqual(window.scheduler._queue[-1].text, "*SET:GAME STOP")
+        window.control_panel.game_query_button.click()
+        self.assertEqual(window.scheduler._queue[-1].text, "*GET:GAME")
 
 
 if __name__ == "__main__":

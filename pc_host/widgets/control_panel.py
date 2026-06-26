@@ -137,11 +137,15 @@ class ControlPanel(QWidget):
         game_layout = QFormLayout(game_box)
         self.game_start_button = QPushButton("开始游戏")
         self.game_stop_button = QPushButton("停止游戏")
+        self.game_start_button.setMinimumHeight(32)
+        self.game_stop_button.setMinimumHeight(32)
+        self.game_query_button = QPushButton("GET GAME")
         game_buttons_widget = QWidget()
         game_buttons = QHBoxLayout(game_buttons_widget)
         game_buttons.setContentsMargins(0, 0, 0, 0)
         game_buttons.addWidget(self.game_start_button)
         game_buttons.addWidget(self.game_stop_button)
+        game_buttons.addWidget(self.game_query_button)
         self.game_state_label = QLabel("状态：IDLE")
         self.game_round_label = QLabel("轮次：0/5")
         self.game_target_label = QLabel("目标：-")
@@ -194,6 +198,7 @@ class ControlPanel(QWidget):
         self.get_alarm_button.clicked.connect(lambda: self._emit("*GET:ALARM"))
         self.game_start_button.clicked.connect(lambda: self._emit("*SET:GAME START"))
         self.game_stop_button.clicked.connect(lambda: self._emit("*SET:GAME STOP"))
+        self.game_query_button.clicked.connect(lambda: self._emit("*GET:GAME"))
         self.connect_button.clicked.connect(lambda: self.connect_requested.emit(self.selected_port()))
         self.disconnect_button.clicked.connect(self.disconnect_requested.emit)
         self.refresh_button.clicked.connect(self.refresh_requested.emit)
@@ -272,6 +277,7 @@ class ControlPanel(QWidget):
             self.get_alarm_button,
             self.game_start_button,
             self.game_stop_button,
+            self.game_query_button,
         ):
             button.setEnabled(ready)
         for button in self.key_buttons.values():
