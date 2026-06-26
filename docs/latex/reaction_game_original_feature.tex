@@ -1,0 +1,253 @@
+\documentclass[12pt,a4paper]{ctexart}
+\usepackage[a4paper,margin=2.2cm]{geometry}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{hyperref}
+
+\title{原创功能说明：反应时间测试游戏}
+\author{EXP\_modified 项目}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{功能概述}
+
+本文档用于说明本项目的原创功能“反应时间测试游戏”。该功能基于现有 S800 板硬件资源和 PC Host 上位机实现，目标是在不改变课程核心功能的前提下，为系统增加一个具有演示效果、交互价值和工程实现价值的扩展模块。
+
+本功能不与已有核心功能和扩展功能重复。它不属于时钟显示、闹钟、天气、对时、昼夜模式或数据看板的简单增强，而是一个独立的人机交互应用，重点体现如下能力：
+
+\begin{itemize}[leftmargin=2em]
+  \item 毫秒级计时能力；
+  \item 单片机状态机设计能力；
+  \item 板端输入、LED 输出、数码管显示的联动能力；
+  \item PC Host 与 MCU 串口事件同步能力；
+  \item 日志记录与结果展示能力。
+\end{itemize}
+
+\section{动机}
+
+当前系统已经具备时钟、日期、闹钟、天气、自动昼夜模式、数字孪生镜像等实用功能，但整体仍以“显示”和“控制”为主，交互性相对有限。为了提升系统的可演示性和趣味性，并进一步展示 MCU 与上位机协同工作的完整链路，本项目设计了“反应时间测试游戏”作为原创功能。
+
+该功能能够让系统从“被动显示设备”扩展为“主动交互设备”。用户通过 PC Host 启动游戏后，S800 板随机点亮某一目标 LED，用户按下对应按键，系统记录并显示反应时间。整个过程同时涉及按键输入、LED 控制、数码管显示、串口事件上报和 PC 界面状态同步，适合作为课程大作业中的原创扩展功能进行展示。
+
+\section{设计}
+
+\subsection{总体设计目标}
+
+本功能的设计目标如下：
+
+\begin{itemize}[leftmargin=2em]
+  \item 与课程已有功能明显区分；
+  \item 适合在 60--90 秒内完成演示；
+  \item 能在现有代码结构上增量实现；
+  \item 保持作业风格，不引入过度工程化设计。
+\end{itemize}
+
+\subsection{游戏流程}
+
+单次游戏默认进行 5 轮，每轮流程如下：
+
+\begin{enumerate}[leftmargin=2em]
+  \item PC Host 点击“开始游戏”；
+  \item MCU 进入游戏状态并清空本局统计信息；
+  \item 进入当前轮的等待阶段，随机等待 1--3 秒；
+  \item 随机点亮一个目标 LED，并开始毫秒级计时；
+  \item 用户按下对应按键：
+  \begin{itemize}[leftmargin=2em]
+    \item 正确按键：记为 \texttt{HIT}，记录反应时间；
+    \item 错误按键：记为 \texttt{MISS}；
+    \item 超过 2 秒未按：记为 \texttt{TIMEOUT}；
+    \item 在目标亮起前抢按：首版按 \texttt{MISS} 处理。
+  \end{itemize}
+  \item 板端短暂显示本轮结果；
+  \item 若轮次未结束，则进入下一轮；否则输出整局统计并恢复普通模式。
+\end{enumerate}
+
+\subsection{状态机设计}
+
+游戏采用简单状态机实现，状态定义如下：
+
+\begin{itemize}[leftmargin=2em]
+  \item \texttt{IDLE}：普通状态，系统执行原有时钟与显示逻辑；
+  \item \texttt{WAIT}：已开始当前轮，等待随机延时结束；
+  \item \texttt{GO}：目标 LED 已点亮，等待按键输入；
+  \item \texttt{RESULT}：当前轮结束，短暂显示结果；
+  \item \texttt{DONE}：整局结束，短暂显示统计信息后返回 \texttt{IDLE}。
+\end{itemize}
+
+状态转移关系如下：
+
+\begin{center}
+\texttt{IDLE \rightarrow WAIT \rightarrow GO \rightarrow RESULT \rightarrow WAIT / DONE \rightarrow IDLE}
+\end{center}
+
+\subsection{按键与 LED 映射}
+
+为保证实现简单且不与现有扩展联动冲突，游戏仅使用 4 个主按键与 4 个目标 LED：
+
+\begin{center}
+\begin{tabular}{cc}
+\toprule
+LED & 目标按键 \\
+\midrule
+LED1 & FUNC \\
+LED2 & SHIFT \\
+LED3 & ADD \\
+LED4 & SAVE \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+在游戏进行过程中，这 4 个按键暂时作为游戏输入；游戏结束后，恢复其原有功能。
+
+\subsection{显示与 LED 策略}
+
+\paragraph{LED 行为}
+游戏期间 LED 采用“游戏覆盖”模式：
+
+\begin{itemize}[leftmargin=2em]
+  \item \texttt{WAIT}：目标 LED 熄灭；
+  \item \texttt{GO}：仅点亮目标 LED；
+  \item \texttt{RESULT}：可短暂闪烁作为结果提示；
+  \item \texttt{DONE}：可短暂闪烁后恢复普通 LED 语义。
+\end{itemize}
+
+\paragraph{数码管行为}
+首版数码管显示遵循“简单清晰”的原则：
+
+\begin{itemize}[leftmargin=2em]
+  \item \texttt{WAIT}：显示等待提示；
+  \item \texttt{GO}：显示当前轮次或目标简要信息；
+  \item \texttt{RESULT}：显示本轮结果；
+  \item \texttt{DONE}：显示最佳值或平均值，再返回正常时钟显示。
+\end{itemize}
+
+\section{协议设计}
+
+为兼容现有串口协议风格，游戏功能继续采用 \texttt{*SET:* / *GET:* / *EVT:*} 结构。
+
+\subsection{PC 到 MCU 命令}
+
+\begin{center}
+\begin{tabular}{p{3.2cm}p{10.4cm}}
+\toprule
+命令 & 说明 \\
+\midrule
+\texttt{*SET:GAME START} & 启动一局新游戏，清空本局统计，进入 \texttt{WAIT}。 \\
+\texttt{*SET:GAME STOP} & 强制停止当前游戏，清理临时显示，恢复普通模式。 \\
+\texttt{*GET:GAME} & 查询当前游戏状态，用于调试或手动同步。 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{MCU 到 PC 事件}
+
+\begin{center}
+\begin{tabular}{p{4.2cm}p{9.4cm}}
+\toprule
+事件 & 说明 \\
+\midrule
+\texttt{*EVT:GAME START} & 表示本局开始。 \\
+\texttt{*EVT:GAME READY <round> <target>} & 表示当前轮目标已出现，开始计时。 \\
+\texttt{*EVT:GAME HIT <round> <target> <ms>} & 表示本轮命中成功，并上报反应时间。 \\
+\texttt{*EVT:GAME MISS <round> <target> <actual>} & 表示按错键或抢按。 \\
+\texttt{*EVT:GAME TIMEOUT <round> <target>} & 表示超时未响应。 \\
+\texttt{*EVT:GAME DONE <rounds> <success> <best\_ms> <avg\_ms>} & 表示整局结束，并上报统计结果。 \\
+\texttt{*EVT:GAME STOP} & 表示游戏被主动停止。 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{实现}
+
+\subsection{MCU 端实现}
+
+MCU 端主要在 \texttt{microchip/exp3-1.c} 中实现。核心工作包括：
+
+\begin{itemize}[leftmargin=2em]
+  \item 增加游戏状态常量与全局状态字段；
+  \item 在 \texttt{HandleSetCommand} 和 \texttt{HandleGetCommand} 中接入 \texttt{GAME} 分支；
+  \item 实现 \texttt{StartGameSession}、\texttt{StartGameRound} 和 \texttt{ProcessGameTask}；
+  \item 在 \texttt{SysTick\_Handler} 中维护等待、计时和结果保持时间；
+  \item 在 \texttt{ProcessKeyTask} 中拦截游戏态下的 4 个按键；
+  \item 在 \texttt{ComputeLedOutput} 与 \texttt{UpdateDisplayBuffer} 中增加游戏显示优先级；
+  \item 通过 \texttt{EmitGameEvent*} 系列函数向 PC Host 上报事件。
+\end{itemize}
+
+MCU 端统计信息仅保存在 RAM 中，系统复位后清空，不引入 EEPROM 持久化逻辑。
+
+\subsection{PC Host 端实现}
+
+PC 端主要涉及如下文件：
+
+\begin{itemize}[leftmargin=2em]
+  \item \texttt{pc\_host/device\_state.py}：保存和更新游戏状态；
+  \item \texttt{pc\_host/widgets/control\_panel.py}：增加原创功能控制区与状态展示；
+  \item \texttt{pc\_host/main\_window.py}：接收 \texttt{GAME} 事件并刷新界面；
+  \item \texttt{pc\_host/commands.py}：支持 \texttt{*GET:GAME} 查询识别；
+  \item \texttt{pc\_host/tests/}：增加对游戏状态与界面行为的测试。
+\end{itemize}
+
+PC Host 展示内容包括：
+
+\begin{itemize}[leftmargin=2em]
+  \item 当前状态；
+  \item 当前轮次；
+  \item 当前目标；
+  \item 最近结果类型；
+  \item 本次成绩；
+  \item 最佳成绩；
+  \item 平均成绩；
+  \item 成功次数。
+\end{itemize}
+
+日志区继续沿用现有 send / reply / event / error 分类，并记录游戏事件，便于演示和调试。
+
+\section{演示}
+
+推荐的演示流程如下：
+
+\begin{enumerate}[leftmargin=2em]
+  \item 打开 PC Host 并连接串口；
+  \item 点击“开始游戏”；
+  \item 观察板端进入等待状态；
+  \item 在 3--5 轮内展示不同结果；
+  \item 至少展示一次 \texttt{HIT}；
+  \item 至少展示一次 \texttt{MISS} 或 \texttt{TIMEOUT}；
+  \item 展示上位机中的最佳值、平均值和成功次数；
+  \item 游戏结束后，展示板端恢复正常时钟显示。
+\end{enumerate}
+
+该流程适合在 60--90 秒内完成，符合课程演示要求。
+
+\section{关键代码位置}
+
+当前实现中，与原创功能直接相关的关键代码位置如下：
+
+\begin{itemize}[leftmargin=2em]
+  \item MCU：\texttt{microchip/exp3-1.c}
+  \begin{itemize}[leftmargin=2em]
+    \item \texttt{HandleSetGame / HandleGetGame}
+    \item \texttt{ProcessGameTask}
+    \item \texttt{HandleGameKeyEvent}
+    \item \texttt{ComputeLedOutput}
+    \item \texttt{BuildGameDisplayText}
+  \end{itemize}
+  \item PC：\texttt{pc\_host/device\_state.py}
+  \item PC：\texttt{pc\_host/widgets/control\_panel.py}
+  \item PC：\texttt{pc\_host/main\_window.py}
+\end{itemize}
+
+这些位置可以作为报告说明和视频演示时的代码定位依据。
+
+\section{总结}
+
+“反应时间测试游戏”在不破坏原有时钟系统主体功能的前提下，为项目增加了一个具有明确原创性、良好演示效果和适中实现复杂度的扩展功能。它综合使用了 S800 板的 LED、按键、数码管和串口通信资源，同时在 PC Host 中完成了事件同步、状态展示和日志记录，较好体现了嵌入式系统与上位机协同设计的工程价值。
+
+从课程要求角度看，该功能满足“有明确动机、设计清晰、实现可落地、演示过程完整”的原创功能要求，适合作为大作业文档中的独立章节或附加说明进行整理与展示。
+
+\end{document}
